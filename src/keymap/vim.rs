@@ -11,6 +11,12 @@ impl VimKeymap {
     }
 }
 
+impl Default for VimKeymap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KeymapHandler for VimKeymap {
     fn handle_key<'a>(
         &'a mut self,

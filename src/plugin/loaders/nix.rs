@@ -87,6 +87,13 @@ impl Plugin for NixPlugin {
 
 impl NixPlugin {
     fn install_from_github(&self, repo_url: &str, api: &PluginApi) -> Result<(), String> {
+        if !repo_url.starts_with("https://github.com/") {
+            return Err(format!(
+                "Invalid repository URL: only https://github.com/ URLs are allowed, got: {}",
+                repo_url
+            ));
+        }
+
         api.log(&format!("Installing Nix plugin from {}", repo_url));
 
         let temp_dir = std::env::temp_dir().join("nestvim-nix");

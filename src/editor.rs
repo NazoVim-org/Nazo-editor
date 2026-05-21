@@ -1,5 +1,6 @@
 use crate::buffer::TextBuffer;
 use crate::highlight::Highlighter;
+use syntect::highlighting::Style;
 use crate::keymap::create_keymap;
 use crate::keymap::KeymapHandler;
 use crate::plugin::PluginManager;
@@ -45,6 +46,7 @@ pub struct Editor {
     pub(crate) last_fchar_till: bool,
     pub(crate) keymap_handler: Rc<RefCell<dyn KeymapHandler>>,
     pub(crate) pending_save: bool,
+    pub(crate) highlights: Vec<Vec<(Style, String)>>,
 }
 
 #[derive(Clone)]
@@ -114,6 +116,7 @@ impl Editor {
             last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
             pending_save: false,
+            highlights: Vec::new(),
         })
     }
 
@@ -196,6 +199,7 @@ impl Editor {
             last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
             pending_save: false,
+            highlights: Vec::new(),
         })
     }
 
@@ -239,7 +243,7 @@ impl Editor {
             if self.buffer.modification_count() > self.last_highlight_mod_count
                 && now.duration_since(self.last_keypress_time) > Duration::from_millis(150)
             {
-                let _ = self
+                self.highlights = self
                     .highlighter
                     .update(&self.buffer.to_string(), self.state.file_path.as_deref());
                 self.last_highlight_mod_count = self.buffer.modification_count();
@@ -259,7 +263,10 @@ impl Editor {
         Ok(())
     }
 
+    #[allow(clippy::await_holding_refcell_ref)]
     async fn handle_key(&mut self, key: KeyCode, modifiers: KeyModifiers) {
+        // Safety: single-threaded TUI context; no concurrent RefCell access possible.
+        // The RefMut is held across await because the future borrows the handler.
         let keymap_handler = Rc::clone(&self.keymap_handler);
         keymap_handler
             .borrow_mut()
@@ -2424,6 +2431,7 @@ mod tests {
             last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
             pending_save: false,
+            highlights: Vec::new(),
         }
     }
 

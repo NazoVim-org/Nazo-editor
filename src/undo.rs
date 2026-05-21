@@ -90,7 +90,7 @@ impl UndoManager {
         match &edit.edit_type {
             EditType::Insert { line, col, text } => {
                 let start = buffer.line_to_char(line - 1) + col;
-                let end = start + text.len();
+                let end = start + text.chars().count();
                 buffer.remove_range(start, end);
             }
             EditType::Delete { line, col, text } => {
@@ -111,7 +111,7 @@ impl UndoManager {
                 new_text,
             } => {
                 let start = buffer.line_to_char(line - 1) + col;
-                let end = start + new_text.len();
+                let end = start + new_text.chars().count();
                 buffer.remove_range(start, end);
                 buffer.insert(*line, *col, old_text);
             }
@@ -141,7 +141,7 @@ impl UndoManager {
             }
             EditType::Delete { line, col, text } => {
                 let start = buffer.line_to_char(line - 1) + col;
-                let end = start + text.len();
+                let end = start + text.chars().count();
                 buffer.remove_range(start, end);
             }
             EditType::InsertLine { line, text } => {
@@ -158,7 +158,7 @@ impl UndoManager {
                 new_text,
             } => {
                 let start = buffer.line_to_char(line - 1) + col;
-                let end = start + old_text.len();
+                let end = start + old_text.chars().count();
                 buffer.remove_range(start, end);
                 buffer.insert(*line, *col, new_text);
             }
