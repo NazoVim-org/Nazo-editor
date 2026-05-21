@@ -61,7 +61,10 @@ impl KeymapHandler for VimKeymap {
                 }
             }
 
-            match editor.state.mode {
+            // Capture mode BEFORE dispatching to prevent mode-transition keys
+            // (like 'i', 'a', 'v', ':') from being re-dispatched to the new mode.
+            let mode = editor.state.mode;
+            match mode {
                 Mode::Normal => editor.handle_normal(key).await,
                 Mode::Insert => editor.handle_insert(key).await,
                 Mode::Command => editor.handle_command(key).await,

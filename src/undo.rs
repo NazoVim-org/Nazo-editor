@@ -45,6 +45,7 @@ pub struct Edit {
     pub cursor_before: Position,
     #[allow(dead_code)]
     pub cursor_after: Position,
+    pub modification_count: usize,
 }
 
 pub struct UndoManager {
@@ -75,6 +76,7 @@ impl UndoManager {
         let edit = self.undo_stack.pop_back()?;
         self.redo_stack.push_back(edit.clone());
         self.apply_undo(buffer, &edit);
+        buffer.reset_modification_count(edit.modification_count);
         Some(edit)
     }
 
@@ -83,6 +85,7 @@ impl UndoManager {
         let edit = self.redo_stack.pop_back()?;
         self.undo_stack.push_back(edit.clone());
         self.apply_redo(buffer, &edit);
+        buffer.reset_modification_count(edit.modification_count);
         Some(edit)
     }
 
@@ -100,9 +103,13 @@ impl UndoManager {
                 buffer.delete_line(*line);
             }
             EditType::DeleteLine { line, text } => {
-                let insert_pos = *line - 1;
-                buffer.insert(insert_pos, 0, text);
-                buffer.insert(insert_pos, text.len(), "\n");
+                // If the buffer is just a single newline (last line was deleted),
+                // replace it with the deleted text.
+                if buffer.to_string() == "\n" {
+                    buffer.replace_with(text);
+                } else {
+                    buffer.insert(*line, 0, text);
+                }
             }
             EditType::Replace {
                 line,
