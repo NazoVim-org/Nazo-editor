@@ -15,16 +15,11 @@ pub enum NestvimError {
     NoFilePath,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Keymap {
+    #[default]
     Vim,
     Emacs,
-}
-
-impl Default for Keymap {
-    fn default() -> Self {
-        Keymap::Vim
-    }
 }
 
 impl std::fmt::Display for Keymap {

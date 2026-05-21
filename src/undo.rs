@@ -45,6 +45,7 @@ pub struct Edit {
     pub cursor_before: Position,
     #[allow(dead_code)]
     pub cursor_after: Position,
+    pub modification_count: usize,
 }
 
 pub struct UndoManager {
@@ -75,6 +76,7 @@ impl UndoManager {
         let edit = self.undo_stack.pop_back()?;
         self.redo_stack.push_back(edit.clone());
         self.apply_undo(buffer, &edit);
+        buffer.reset_modification_count(edit.modification_count);
         Some(edit)
     }
 
@@ -83,6 +85,7 @@ impl UndoManager {
         let edit = self.redo_stack.pop_back()?;
         self.undo_stack.push_back(edit.clone());
         self.apply_redo(buffer, &edit);
+        buffer.reset_modification_count(edit.modification_count);
         Some(edit)
     }
 
@@ -90,7 +93,7 @@ impl UndoManager {
         match &edit.edit_type {
             EditType::Insert { line, col, text } => {
                 let start = buffer.line_to_char(line - 1) + col;
-                let end = start + text.len();
+                let end = start + text.chars().count();
                 buffer.remove_range(start, end);
             }
             EditType::Delete { line, col, text } => {
@@ -100,9 +103,13 @@ impl UndoManager {
                 buffer.delete_line(*line);
             }
             EditType::DeleteLine { line, text } => {
-                let insert_pos = *line - 1;
-                buffer.insert(insert_pos, 0, text);
-                buffer.insert(insert_pos, text.len(), "\n");
+                // If the buffer is just a single newline (last line was deleted),
+                // replace it with the deleted text.
+                if buffer.to_string() == "\n" {
+                    buffer.replace_with(text);
+                } else {
+                    buffer.insert(*line, 0, text);
+                }
             }
             EditType::Replace {
                 line,
@@ -111,7 +118,7 @@ impl UndoManager {
                 new_text,
             } => {
                 let start = buffer.line_to_char(line - 1) + col;
-                let end = start + new_text.len();
+                let end = start + new_text.chars().count();
                 buffer.remove_range(start, end);
                 buffer.insert(*line, *col, old_text);
             }
@@ -141,7 +148,7 @@ impl UndoManager {
             }
             EditType::Delete { line, col, text } => {
                 let start = buffer.line_to_char(line - 1) + col;
-                let end = start + text.len();
+                let end = start + text.chars().count();
                 buffer.remove_range(start, end);
             }
             EditType::InsertLine { line, text } => {
@@ -158,7 +165,7 @@ impl UndoManager {
                 new_text,
             } => {
                 let start = buffer.line_to_char(line - 1) + col;
-                let end = start + old_text.len();
+                let end = start + old_text.chars().count();
                 buffer.remove_range(start, end);
                 buffer.insert(*line, *col, new_text);
             }

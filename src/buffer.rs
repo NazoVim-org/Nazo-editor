@@ -7,6 +7,7 @@ pub struct TextBuffer {
     pub file_path: Option<PathBuf>,
     pub dirty: bool,
     modification_count: usize,
+    pub(crate) saved_modification_count: usize,
 }
 
 impl TextBuffer {
@@ -16,6 +17,7 @@ impl TextBuffer {
             file_path: None,
             dirty: false,
             modification_count: 0,
+            saved_modification_count: 0,
         }
     }
 
@@ -25,6 +27,7 @@ impl TextBuffer {
             file_path: None,
             dirty: false,
             modification_count: 0,
+            saved_modification_count: 0,
         }
     }
 
@@ -139,6 +142,7 @@ impl TextBuffer {
         let content = self.doc.to_string();
         tokio::fs::write(path, content).await?;
         self.file_path = Some(path.to_path_buf());
+        self.saved_modification_count = self.modification_count;
         self.dirty = false;
         Ok(())
     }
@@ -150,6 +154,29 @@ impl TextBuffer {
 
     pub fn modification_count(&self) -> usize {
         self.modification_count
+    }
+
+    pub fn is_clean(&self) -> bool {
+        self.modification_count == self.saved_modification_count
+    }
+
+    pub fn reset_clean_state(&mut self) {
+        self.saved_modification_count = self.modification_count;
+        self.dirty = false;
+    }
+
+    pub(crate) fn reset_modification_count(&mut self, count: usize) {
+        self.modification_count = count;
+    }
+
+    pub(crate) fn replace_with(&mut self, text: &str) {
+        let len = self.doc.len_chars();
+        if len > 0 {
+            self.doc.remove(0..len);
+        }
+        self.doc.insert(0, text);
+        self.dirty = true;
+        self.modification_count += 1;
     }
 
     pub fn line_to_char(&self, line_idx: usize) -> usize {
@@ -279,6 +306,10 @@ impl TextBuffer {
 
         if char_end > char_start {
             self.doc.remove(char_start..char_end);
+            // Ensure buffer always has at least one newline
+            if self.doc.len_chars() == 0 {
+                self.doc.insert(0, "\n");
+            }
             self.dirty = true;
             self.modification_count += 1;
         }

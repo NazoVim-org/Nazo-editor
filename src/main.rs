@@ -122,8 +122,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_mode_subcommand() {
-        let result = Cli::try_parse_from(["nestvim", "invalid-mode"]);
-        assert!(result.is_err());
+    fn treats_unknown_subcommand_as_file_argument() {
+        // clap treats unrecognized tokens as positional args (file), not as subcommands.
+        // This is expected: `nestvim invalid-mode` opens a file named "invalid-mode".
+        let cli = Cli::try_parse_from(["nestvim", "invalid-mode"])
+            .expect("should parse unknown token as file argument");
+        let (keymap, file) = resolve_cli(cli);
+        assert_eq!(keymap, Keymap::Vim);
+        assert_eq!(file.as_deref(), Some("invalid-mode"));
     }
 }

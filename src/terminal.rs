@@ -4,7 +4,7 @@ use crossterm::{
     terminal::{size, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use std::collections::HashMap;
-use std::io::{self, stdout, BufWriter, Stdout, Write};
+use std::io::{self, stdout, BufWriter, IsTerminal, Stdout, Write};
 
 pub struct Terminal {
     rows: u16,
@@ -38,7 +38,7 @@ impl Terminal {
     }
 
     pub fn enable_raw_mode(&mut self) -> io::Result<()> {
-        if !atty::is(atty::Stream::Stdin) {
+        if !std::io::stdin().is_terminal() {
             return Err(io::Error::other("Not a terminal"));
         }
         crossterm::terminal::enable_raw_mode()?;

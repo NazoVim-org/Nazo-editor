@@ -10,13 +10,14 @@ use crate::types::{
     ConfirmAction, EditorState, Keymap, Mode, PluginEvent, SearchDirection, SearchResult,
     VisualType,
 };
-use crate::undo::UndoManager;
+use crate::undo::{Edit, EditType, UndoManager};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+use syntect::highlighting::Style;
 
 pub struct Editor {
     pub(crate) terminal: Terminal,
@@ -45,6 +46,7 @@ pub struct Editor {
     pub(crate) last_fchar_till: bool,
     pub(crate) keymap_handler: Rc<RefCell<dyn KeymapHandler>>,
     pub(crate) pending_save: bool,
+    pub(crate) highlights: Vec<Vec<(Style, String)>>,
 }
 
 #[derive(Clone)]
@@ -114,6 +116,7 @@ impl Editor {
             last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
             pending_save: false,
+            highlights: Vec::new(),
         })
     }
 
@@ -196,6 +199,7 @@ impl Editor {
             last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
             pending_save: false,
+            highlights: Vec::new(),
         })
     }
 
@@ -239,7 +243,7 @@ impl Editor {
             if self.buffer.modification_count() > self.last_highlight_mod_count
                 && now.duration_since(self.last_keypress_time) > Duration::from_millis(150)
             {
-                let _ = self
+                self.highlights = self
                     .highlighter
                     .update(&self.buffer.to_string(), self.state.file_path.as_deref());
                 self.last_highlight_mod_count = self.buffer.modification_count();
@@ -259,7 +263,10 @@ impl Editor {
         Ok(())
     }
 
+    #[allow(clippy::await_holding_refcell_ref)]
     async fn handle_key(&mut self, key: KeyCode, modifiers: KeyModifiers) {
+        // Safety: single-threaded TUI context; no concurrent RefCell access possible.
+        // The RefMut is held across await because the future borrows the handler.
         let keymap_handler = Rc::clone(&self.keymap_handler);
         keymap_handler
             .borrow_mut()
@@ -1104,8 +1111,19 @@ impl Editor {
 
     fn delete_line(&mut self, register: char) {
         let line = self.state.cursor.line;
+        let mod_count = self.buffer.modification_count();
         let content = self.buffer.delete_line(line);
         self.register.set(register, &content);
+
+        self.undo_manager.push(Edit {
+            edit_type: EditType::DeleteLine {
+                line,
+                text: content.clone(),
+            },
+            cursor_before: self.state.cursor,
+            cursor_after: self.state.cursor,
+            modification_count: mod_count,
+        });
 
         let line_count = self.buffer.line_count();
         if line > line_count {
@@ -1113,7 +1131,7 @@ impl Editor {
         }
         let len = self.buffer.get_line(self.state.cursor.line).len();
         self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
-        self.needs_render = true;
+        self.on_buffer_modified();
     }
 
     fn delete_word(&mut self, register: char) {
@@ -1378,6 +1396,7 @@ impl Editor {
     pub(crate) fn undo(&mut self) {
         if let Some(edit) = self.undo_manager.undo(&mut self.buffer) {
             self.state.cursor = edit.cursor_before;
+            self.buffer.dirty = !self.buffer.is_clean();
             self.needs_render = true;
         }
     }
@@ -1552,9 +1571,10 @@ impl Editor {
         match key {
             KeyCode::Enter => {
                 let cmd = self.state.command_buffer.trim().to_string();
+                let cmd = cmd.strip_prefix(':').unwrap_or(&cmd);
                 self.state.command_buffer.clear();
 
-                match cmd.as_str() {
+                match cmd {
                     "q" => {
                         self.handle_quit();
                     }
@@ -1620,12 +1640,12 @@ impl Editor {
                     }
                     _ => {
                         if cmd.starts_with("set ") {
-                            self.handle_set_command(&cmd);
+                            self.handle_set_command(cmd);
                         } else if cmd.starts_with("w ") || cmd.starts_with("w! ") {
-                            self.handle_write_path(&cmd).await;
+                            self.handle_write_path(cmd).await;
                         } else if cmd.starts_with("wq ") || cmd.starts_with("wq! ") {
-                            self.handle_write_quit_path(&cmd).await;
-                        } else if !self.plugin_manager.execute_command(&cmd) {
+                            self.handle_write_quit_path(cmd).await;
+                        } else if !self.plugin_manager.execute_command(cmd) {
                             eprintln!("[editor] Unknown command: {}", cmd);
                         }
                     }
@@ -1662,6 +1682,7 @@ impl Editor {
             self.needs_render = true;
         } else {
             self.running = false;
+            self.state.mode = Mode::Normal;
         }
     }
 
@@ -1690,10 +1711,12 @@ impl Editor {
             ConfirmAction::Quit => {
                 if should_quit {
                     self.running = false;
+                    self.state.mode = Mode::Normal;
                 }
             }
             ConfirmAction::QuitDiscard => {
                 self.running = false;
+                self.state.mode = Mode::Normal;
             }
             ConfirmAction::WriteQuitAll => {
                 if !should_quit {
@@ -1706,6 +1729,7 @@ impl Editor {
                         file_path: self.state.file_path.clone(),
                     });
                     self.running = false;
+                    self.state.mode = Mode::Normal;
                 }
             }
         }
@@ -2183,12 +2207,24 @@ impl Editor {
         let line = self.buffer.get_line(self.state.cursor.line);
         if self.state.cursor.col < line.len() {
             let end_col = line.len();
+            let deleted = line[self.state.cursor.col..].to_string();
+            let mod_count = self.buffer.modification_count();
             self.buffer.delete_range(
                 self.state.cursor.line,
                 self.state.cursor.col,
                 self.state.cursor.line,
                 end_col,
             );
+            self.undo_manager.push(Edit {
+                edit_type: EditType::Delete {
+                    line: self.state.cursor.line,
+                    col: self.state.cursor.col,
+                    text: deleted,
+                },
+                cursor_before: self.state.cursor,
+                cursor_after: self.state.cursor,
+                modification_count: mod_count,
+            });
             self.state.dirty = true;
             self.needs_render = true;
         }
@@ -2353,6 +2389,9 @@ impl Editor {
         self.state.cursor.line = 1;
         self.state.cursor.col = 0;
         self.state.mode = Mode::Normal;
+        self.state.dirty = false;
+        self.undo_manager.clear();
+        self.buffer.reset_clean_state();
     }
 
     pub fn snapshot_for_test(&self) -> (String, usize, usize, Mode) {
@@ -2424,6 +2463,7 @@ mod tests {
             last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
             pending_save: false,
+            highlights: Vec::new(),
         }
     }
 
