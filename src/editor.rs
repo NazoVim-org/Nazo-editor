@@ -1,6 +1,5 @@
 use crate::buffer::TextBuffer;
 use crate::highlight::Highlighter;
-use syntect::highlighting::Style;
 use crate::keymap::create_keymap;
 use crate::keymap::KeymapHandler;
 use crate::plugin::PluginManager;
@@ -18,6 +17,7 @@ use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+use syntect::highlighting::Style;
 
 pub struct Editor {
     pub(crate) terminal: Terminal,
