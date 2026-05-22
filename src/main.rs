@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
-use nestvim::editor::Editor;
-use nestvim::types::Keymap;
+use ijevim::editor::Editor;
+use ijevim::types::Keymap;
 
 #[derive(Parser)]
-#[command(name = "nestvim")]
+#[command(name = "ivim")]
 #[command(version = "0.1.0")]
 #[command(about = "A minimal Vim-like TUI editor written in Rust", long_about = None)]
 struct Cli {
@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn parses_vim_subcommand_without_file() {
-        let cli = Cli::try_parse_from(["nestvim", "vim"]).expect("vim subcommand should parse");
+        let cli = Cli::try_parse_from(["ivim", "vim"]).expect("vim subcommand should parse");
         let (keymap, file) = resolve_cli(cli);
         assert_eq!(keymap, Keymap::Vim);
         assert_eq!(file, None);
@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn parses_emacs_subcommand_without_file() {
-        let cli = Cli::try_parse_from(["nestvim", "emacs"]).expect("emacs subcommand should parse");
+        let cli = Cli::try_parse_from(["ivim", "emacs"]).expect("emacs subcommand should parse");
         let (keymap, file) = resolve_cli(cli);
         assert_eq!(keymap, Keymap::Emacs);
         assert_eq!(file, None);
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn parses_vim_subcommand_with_file() {
-        let cli = Cli::try_parse_from(["nestvim", "vim", "sample.txt"])
+        let cli = Cli::try_parse_from(["ivim", "vim", "sample.txt"])
             .expect("vim subcommand with file should parse");
         let (keymap, file) = resolve_cli(cli);
         assert_eq!(keymap, Keymap::Vim);
@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn parses_emacs_subcommand_with_file() {
-        let cli = Cli::try_parse_from(["nestvim", "emacs", "sample.txt"])
+        let cli = Cli::try_parse_from(["ivim", "emacs", "sample.txt"])
             .expect("emacs subcommand with file should parse");
         let (keymap, file) = resolve_cli(cli);
         assert_eq!(keymap, Keymap::Emacs);
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn parses_top_level_file_as_default_vim() {
-        let cli = Cli::try_parse_from(["nestvim", "sample.txt"])
+        let cli = Cli::try_parse_from(["ivim", "sample.txt"])
             .expect("top-level file argument should parse");
         let (keymap, file) = resolve_cli(cli);
         assert_eq!(keymap, Keymap::Vim);
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn honors_parent_file_when_mode_subcommand_is_present() {
-        let cli = Cli::try_parse_from(["nestvim", "sample.txt", "emacs"])
+        let cli = Cli::try_parse_from(["ivim", "sample.txt", "emacs"])
             .expect("parent file before mode subcommand should parse");
         let (keymap, file) = resolve_cli(cli);
         assert_eq!(keymap, Keymap::Emacs);
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn prefers_subcommand_file_over_parent_file() {
-        let cli = Cli::try_parse_from(["nestvim", "parent.txt", "vim", "child.txt"])
+        let cli = Cli::try_parse_from(["ivim", "parent.txt", "vim", "child.txt"])
             .expect("subcommand file should parse");
         let (keymap, file) = resolve_cli(cli);
         assert_eq!(keymap, Keymap::Vim);
@@ -124,8 +124,8 @@ mod tests {
     #[test]
     fn treats_unknown_subcommand_as_file_argument() {
         // clap treats unrecognized tokens as positional args (file), not as subcommands.
-        // This is expected: `nestvim invalid-mode` opens a file named "invalid-mode".
-        let cli = Cli::try_parse_from(["nestvim", "invalid-mode"])
+        // This is expected: `ivim invalid-mode` opens a file named "invalid-mode".
+        let cli = Cli::try_parse_from(["ivim", "invalid-mode"])
             .expect("should parse unknown token as file argument");
         let (keymap, file) = resolve_cli(cli);
         assert_eq!(keymap, Keymap::Vim);

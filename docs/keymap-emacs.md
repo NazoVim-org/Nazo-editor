@@ -1,6 +1,6 @@
 # Emacs キーマップ互換レベル（現時点）
 
-この表は `src/keymap/emacs.rs` の実装に基づく、nestvim の Emacs 互換状況。
+この表は `src/keymap/emacs.rs` の実装に基づく、ijevim の Emacs 互換状況。
 
 ## 移動
 

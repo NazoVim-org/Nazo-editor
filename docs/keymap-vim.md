@@ -1,6 +1,6 @@
 # Vim キーマップ互換レベル（現時点）
 
-この表は `src/editor.rs` の実装に基づく、nestvim の Vim 互換状況。
+この表は `src/editor.rs` の実装に基づく、ijevim の Vim 互換状況。
 
 ## 移動
 

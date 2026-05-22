@@ -56,7 +56,7 @@ impl super::Loader for JavaScriptLoader {
 
         let js_code = format!(
             r#"
-            var nestvim = {{
+            var ijevim = {{
                 log: function(msg) {{ console.log(msg); }}
             }};
             {}"#,

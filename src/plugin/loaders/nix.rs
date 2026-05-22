@@ -96,7 +96,7 @@ impl NixPlugin {
 
         api.log(&format!("Installing Nix plugin from {}", repo_url));
 
-        let temp_dir = std::env::temp_dir().join("nestvim-nix");
+        let temp_dir = std::env::temp_dir().join("ijevim-nix");
         std::fs::create_dir_all(&temp_dir)
             .map_err(|e| format!("Failed to create temp dir: {}", e))?;
 

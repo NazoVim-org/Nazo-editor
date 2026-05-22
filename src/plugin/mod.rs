@@ -35,7 +35,7 @@ impl PluginManager {
                     let home = std::env::var("HOME").expect("HOME environment variable not set");
                     std::path::PathBuf::from(home).join(".config")
                 });
-            config_dir.join("nestvim").join("plugins")
+            config_dir.join("ijevim").join("plugins")
         };
 
         if !plugins_dir.exists() {

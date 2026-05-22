@@ -117,7 +117,7 @@ impl KeymapHandler for EmacsKeymap {
                 (true, KeyCode::Char('o')) => {
                     // Spec decision: keep C-o as a legacy direct save trigger.
                     // Preferred Emacs-style save is C-x C-s, but C-o remains supported
-                    // for compatibility with existing nestvim behavior.
+                    // for compatibility with existing ijevim behavior.
                     editor.pending_save = true;
                 }
                 (true, KeyCode::Char('s')) => {

@@ -4,7 +4,7 @@ This document tracks keybinding behavior implemented in the current codebase.
 
 ## Vim keymap
 
-- `vim` mode can be selected from CLI (`nestvim vim`), but the keymap handler in `src/keymap/vim.rs` is currently a stub and does not implement key handling logic.
+- `vim` mode can be selected from CLI (`ivim vim`), but the keymap handler in `src/keymap/vim.rs` is currently a stub and does not implement key handling logic.
 
 ## Emacs keymap
 
