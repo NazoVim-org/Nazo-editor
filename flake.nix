@@ -12,37 +12,56 @@
       nixpkgs,
       flake-utils,
     }:
-    let
-      rustVersion = "1.80.0";
-    in
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = nixpkgs.legacyPackages.${system};
+        rustPlatform = pkgs.rustPlatform;
       in
       {
+        packages = {
+          default = rustPlatform.buildRustPackage {
+            pname = "ijevim";
+            version = "0.1.0";
+            src = ./.;
+            cargoLock.lockFile = ./Cargo.lock;
+
+            nativeBuildInputs = [ pkgs.pkg-config ];
+
+            meta = {
+              description = "A minimal Vim-like TUI editor written in Rust";
+              homepage = "https://github.com/NazoVim-org/ijevim";
+              license = pkgs.lib.licenses.mit;
+              mainProgram = "ivim";
+            };
+          };
+        };
+
         devShells = {
           default = pkgs.mkShell {
-            nativeBuildInputs = with pkgs; [
-              pkg-config
-              openssl
-              llvmPackages.clang
+            inputsFrom = [ self.packages.${system}.default ];
+
+            packages = with pkgs; [
+              cargo
+              rustc
               rustfmt
               clippy
+              cargo-audit
             ];
 
             RUST_BACKTRACE = "1";
 
             shellHook = ''
-              echo "═══════════════════════════════════════════════════"
-              echo "  ijevim development environment (Rust ${rustVersion})"
-              echo "═══════════════════════════════════════════════════"
-              echo "  Build:   cargo build --release"
-              echo "  Run:     cargo run -- [file]"
-              echo "  Test:    cargo test"
-              echo "  Clippy:  cargo clippy"
-              echo "  Format:  cargo fmt"
-              echo "═══════════════════════════════════════════════════"
+              echo "╔═══════════════════════════════════════════════╗"
+              echo "║             ijevim devShell                   ║"
+              echo "╠═══════════════════════════════════════════════╣"
+              echo "║ Build:  cargo build                          ║"
+              echo "║ Run:    cargo run -- <file>                   ║"
+              echo "║ Test:   cargo test                           ║"
+              echo "║ Clippy: cargo clippy                         ║"
+              echo "║ Audit:  cargo audit                          ║"
+              echo "║ Binary: ivim                                 ║"
+              echo "╚═══════════════════════════════════════════════╝"
             '';
           };
         };
