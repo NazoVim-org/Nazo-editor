@@ -3,8 +3,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-#[allow(dead_code)]
-pub enum NestvimError {
+pub enum IjevimError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Plugin error: {0}")]
@@ -47,12 +46,9 @@ pub enum VisualType {
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct SearchResult {
     pub line: usize,
     pub start_col: usize,
-    #[allow(dead_code)]
-    pub end_col: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -100,7 +96,6 @@ impl Macros {
         self.recording.take()
     }
 
-    #[allow(dead_code)]
     pub fn add_key(&mut self, key: String) {
         if let Some(name) = self.recording {
             if let Some(keys) = self.macros.get_mut(&name) {
@@ -174,7 +169,6 @@ impl Default for EditorState {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum PluginEvent {
     ModeChange { from: Mode, to: Mode },
     BufferChange,
@@ -183,7 +177,6 @@ pub enum PluginEvent {
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub enum ConfirmAction {
     Quit,
     QuitDiscard,

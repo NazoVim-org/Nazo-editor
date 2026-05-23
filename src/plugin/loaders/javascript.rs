@@ -27,10 +27,6 @@ impl Plugin for JavaScriptPlugin {
 pub struct JavaScriptLoader;
 
 impl super::Loader for JavaScriptLoader {
-    fn name(&self) -> &str {
-        "javascript"
-    }
-
     fn supported_extensions(&self) -> &[&str] {
         &["js", "mjs"]
     }

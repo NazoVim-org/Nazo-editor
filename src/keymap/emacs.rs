@@ -40,12 +40,7 @@ impl KeymapHandler for EmacsKeymap {
             let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
             let has_alt = modifiers.contains(KeyModifiers::ALT);
 
-            if let KeyCode::Char(c) = key {
-                editor.plugin_manager.emit(PluginEvent::Key {
-                    mode: editor.state.mode,
-                    key: c,
-                });
-            }
+            editor.emit_key_event(key);
 
             if editor.state.has_confirmation() {
                 editor.handle_confirmation(key).await;

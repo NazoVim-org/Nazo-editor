@@ -38,9 +38,6 @@ impl std::fmt::Display for LoaderError {
 impl std::error::Error for LoaderError {}
 
 pub trait Loader: Send + Sync {
-    #[allow(dead_code)]
-    fn name(&self) -> &str;
-
     fn supported_extensions(&self) -> &[&str];
 
     fn load(&self, path: &Path, api: Rc<PluginApi>) -> Result<Box<dyn Plugin>, LoaderError>;
@@ -74,17 +71,6 @@ impl LoaderRegistry {
         }
 
         Err(LoaderError::UnsupportedLanguage(ext.to_string()))
-    }
-
-    #[allow(dead_code)]
-    pub fn get_supported_extensions(&self) -> Vec<String> {
-        let mut extensions = Vec::new();
-        for loader in &self.loaders {
-            for ext in loader.supported_extensions() {
-                extensions.push(ext.to_string());
-            }
-        }
-        extensions
     }
 }
 

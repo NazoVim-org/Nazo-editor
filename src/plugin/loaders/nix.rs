@@ -10,7 +10,6 @@ pub struct NixPlugin {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct NixConfig {
     pub name: String,
     pub version: Option<String>,
@@ -124,10 +123,6 @@ impl NixPlugin {
 pub struct NixLoader;
 
 impl super::Loader for NixLoader {
-    fn name(&self) -> &str {
-        "nix"
-    }
-
     fn supported_extensions(&self) -> &[&str] {
         &["nix"]
     }

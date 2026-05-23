@@ -25,18 +25,18 @@ impl KeymapHandler for VimKeymap {
         modifiers: KeyModifiers,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>> {
         Box::pin(async move {
-            editor.vim_on_key_event(key);
+            editor.emit_key_event(key);
 
             if modifiers.contains(KeyModifiers::CONTROL) {
                 match editor.state.mode {
                     Mode::Normal | Mode::Insert | Mode::Replace => match key {
                         KeyCode::Char('d') => {
-                            editor.scroll_by(editor.terminal.rows() as usize / 2);
+                            editor.scroll_by(editor.terminal.rows() as usize / 2, true);
                             editor.needs_render = true;
                             return;
                         }
                         KeyCode::Char('u') => {
-                            editor.scroll_by(editor.terminal.rows() as usize / 2);
+                            editor.scroll_by(editor.terminal.rows() as usize / 2, false);
                             editor.needs_render = true;
                             return;
                         }
@@ -55,8 +55,19 @@ impl KeymapHandler for VimKeymap {
                             editor.needs_render = true;
                             return;
                         }
-                        KeyCode::Char('r') if editor.state.mode == Mode::Normal => {
+                        KeyCode::Char('r') => {
                             editor.redo();
+                            editor.needs_render = true;
+                            return;
+                        }
+                        KeyCode::Char('b') => {
+                            editor.page_up();
+                            editor.needs_render = true;
+                            return;
+                        }
+                        KeyCode::Char('f') => {
+                            editor.page_down();
+                            editor.needs_render = true;
                             return;
                         }
                         _ => {}

@@ -27,10 +27,6 @@ impl Plugin for LuaPlugin {
 pub struct LuaLoader;
 
 impl super::Loader for LuaLoader {
-    fn name(&self) -> &str {
-        "lua"
-    }
-
     fn supported_extensions(&self) -> &[&str] {
         &["lua"]
     }

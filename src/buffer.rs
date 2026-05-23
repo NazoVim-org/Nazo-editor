@@ -1,4 +1,4 @@
-use crate::types::NestvimError;
+use crate::types::IjevimError;
 use ropey::Rope;
 use std::path::PathBuf;
 
@@ -123,22 +123,22 @@ impl TextBuffer {
         prev_line_len - 1
     }
 
-    pub async fn load_file(path: &str) -> Result<Self, NestvimError> {
+    pub async fn load_file(path: &str) -> Result<Self, IjevimError> {
         let content = tokio::fs::read_to_string(path).await?;
         let mut buffer = Self::with_text(&content);
         buffer.file_path = Some(PathBuf::from(path));
         Ok(buffer)
     }
 
-    pub async fn save_file(&mut self) -> Result<(), NestvimError> {
+    pub async fn save_file(&mut self) -> Result<(), IjevimError> {
         if let Some(path) = self.file_path.clone() {
             self.save_to_path(&path).await
         } else {
-            Err(NestvimError::NoFilePath)
+            Err(IjevimError::NoFilePath)
         }
     }
 
-    pub async fn save_to_path(&mut self, path: &std::path::Path) -> Result<(), NestvimError> {
+    pub async fn save_to_path(&mut self, path: &std::path::Path) -> Result<(), IjevimError> {
         let content = self.doc.to_string();
         tokio::fs::write(path, content).await?;
         self.file_path = Some(path.to_path_buf());
@@ -183,12 +183,10 @@ impl TextBuffer {
         self.doc.line_to_char(line_idx)
     }
 
-    #[allow(dead_code)]
     pub fn len_chars(&self) -> usize {
         self.doc.len_chars()
     }
 
-    #[allow(dead_code)]
     pub fn get_word_at(&self, line: usize, col: usize) -> (String, usize, usize) {
         let line_idx = line.saturating_sub(1);
         if line_idx >= self.doc.len_lines() {
@@ -215,17 +213,10 @@ impl TextBuffer {
         (word, start, end)
     }
 
-    #[allow(dead_code)]
-    pub fn get_word_at_cursor(&self, line: usize, col: usize) -> String {
-        let (word, _, _) = self.get_word_at(line, col);
-        word
-    }
-
     pub fn get_word_range(&self, line: usize, col: usize) -> (String, usize, usize) {
         self.get_word_at(line, col)
     }
 
-    #[allow(dead_code)]
     pub fn get_line_range(&self, start_line: usize, end_line: usize) -> String {
         if start_line > end_line || start_line < 1 {
             return String::new();
@@ -347,7 +338,6 @@ impl TextBuffer {
         content
     }
 
-    #[allow(dead_code)]
     pub fn remove_range(&mut self, start: usize, end: usize) {
         if start < end {
             self.doc.remove(start..end);
@@ -356,7 +346,6 @@ impl TextBuffer {
         }
     }
 
-    #[allow(dead_code)]
     pub fn search(&self, query: &str) -> Vec<crate::types::SearchResult> {
         if query.is_empty() {
             return Vec::new();
@@ -383,7 +372,6 @@ impl TextBuffer {
                     results.push(crate::types::SearchResult {
                         line: line_idx + 1,
                         start_col: col,
-                        end_col: col + query_chars.len(),
                     });
                     col += 1;
                 } else {

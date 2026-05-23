@@ -3,12 +3,8 @@ use syntect::{
 };
 
 pub struct Highlighter {
-    #[allow(dead_code)]
     syntax_set: SyntaxSet,
-    #[allow(dead_code)]
     theme_set: ThemeSet,
-    #[allow(dead_code)]
-    dirty: bool,
 }
 
 impl Highlighter {
@@ -19,7 +15,6 @@ impl Highlighter {
         Self {
             syntax_set,
             theme_set,
-            dirty: false,
         }
     }
 

@@ -24,10 +24,6 @@ impl Plugin for LispPlugin {
 pub struct LispLoader;
 
 impl super::Loader for LispLoader {
-    fn name(&self) -> &str {
-        "lisp"
-    }
-
     fn supported_extensions(&self) -> &[&str] {
         &["lisp"]
     }

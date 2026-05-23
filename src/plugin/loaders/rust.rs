@@ -11,6 +11,8 @@ type CreatePluginFn = unsafe extern "C" fn() -> *mut dyn Plugin;
 type GetApiVersionFn = unsafe extern "C" fn() -> u32;
 
 pub struct RustPlugin {
+    /// Keep the library alive so function pointers remain valid.
+    _library: Library,
     inner: Box<dyn Plugin>,
 }
 
@@ -35,10 +37,6 @@ impl Plugin for RustPlugin {
 pub struct RustLoader;
 
 impl super::Loader for RustLoader {
-    fn name(&self) -> &str {
-        "rust"
-    }
-
     fn supported_extensions(&self) -> &[&str] {
         &["so", "dylib", "dll"]
     }
@@ -79,7 +77,10 @@ impl super::Loader for RustLoader {
             let mut plugin = Box::from_raw(plugin_ptr);
             plugin.setup(&api);
 
-            Ok(Box::new(RustPlugin { inner: plugin }))
+            Ok(Box::new(RustPlugin {
+                _library: library,
+                inner: plugin,
+            }))
         }
     }
 }
