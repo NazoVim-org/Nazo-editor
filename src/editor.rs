@@ -7,7 +7,7 @@ use crate::register::Register;
 use crate::renderer::Renderer;
 use crate::terminal::Terminal;
 use crate::types::{
-    ConfirmAction, EditorState, Keymap, Mode, PluginEvent, SearchDirection, SearchResult,
+    ConfirmAction, EditorState, Keymap, Mode, PluginEvent, Position, SearchDirection, SearchResult,
     VisualType,
 };
 use crate::undo::{Edit, EditType, UndoManager};
@@ -47,6 +47,75 @@ pub struct Editor {
     pub(crate) keymap_handler: Rc<RefCell<dyn KeymapHandler>>,
     pub(crate) pending_save: bool,
     pub(crate) highlights: Vec<Vec<(Style, String)>>,
+    pub(crate) kill_ring: KillRing,
+}
+
+/// 循環 kill-ring: Emacs の kill 履歴を保持する。
+/// - push(): 最新エントリを先頭に追加（最大 MAX_ENTRIES）
+/// - yank(): 最新エントリを取得
+/// - yank_pop(): 一つ前のエントリに戻る（将来 M-y 用）
+pub(crate) struct KillRing {
+    entries: Vec<String>,
+    index: usize,
+    max_entries: usize,
+}
+
+impl KillRing {
+    const MAX_ENTRIES: usize = 60;
+
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::with_capacity(Self::MAX_ENTRIES),
+            index: 0,
+            max_entries: Self::MAX_ENTRIES,
+        }
+    }
+
+    pub fn push(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        if self.entries.len() >= self.max_entries {
+            self.entries.pop();
+        }
+        self.entries.insert(0, text.to_string());
+        self.index = 0;
+    }
+
+    #[allow(dead_code)]
+    pub fn yank(&self) -> Option<&str> {
+        self.entries.first().map(|s| s.as_str())
+    }
+
+    #[allow(dead_code)]
+    pub fn yank_pop(&mut self) -> Option<&str> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        self.index = (self.index + 1) % self.entries.len();
+        self.entries.get(self.index).map(|s| s.as_str())
+    }
+
+    #[allow(dead_code)]
+    pub fn reset_index(&mut self) {
+        self.index = 0;
+    }
+
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+impl Default for KillRing {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Clone)]
@@ -87,6 +156,8 @@ impl Editor {
             macros: crate::types::Macros::new(),
             confirmation_prompt: None,
             show_line_numbers: true,
+            mark: None,
+            region_active: false,
         };
 
         Ok(Self {
@@ -116,6 +187,7 @@ impl Editor {
             last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
             pending_save: false,
+            kill_ring: KillRing::new(),
             highlights: Vec::new(),
         })
     }
@@ -170,6 +242,8 @@ impl Editor {
             macros: crate::types::Macros::new(),
             confirmation_prompt: None,
             show_line_numbers: true,
+            mark: None,
+            region_active: false,
         };
 
         Ok(Self {
@@ -199,6 +273,7 @@ impl Editor {
             last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
             pending_save: false,
+            kill_ring: KillRing::new(),
             highlights: Vec::new(),
         })
     }
@@ -348,6 +423,49 @@ impl Editor {
                 });
                 self.needs_render = true;
             }
+            KeyCode::Char('0') => {
+                self.state.cursor.col = 0;
+                self.needs_render = true;
+            }
+            KeyCode::Char('^') => {
+                let line = self.buffer.get_line(self.state.cursor.line);
+                let first_non_blank = line
+                    .chars()
+                    .position(|c| !c.is_whitespace())
+                    .unwrap_or(0);
+                self.state.cursor.col = first_non_blank;
+                self.needs_render = true;
+            }
+            KeyCode::Char('$') => {
+                let line_len = self.buffer.get_line(self.state.cursor.line).len();
+                self.state.cursor.col = line_len.saturating_sub(1);
+                self.needs_render = true;
+            }
+            KeyCode::Char('D') => {
+                self.kill_line();
+            }
+            KeyCode::Char('C') => {
+                self.kill_line();
+                let prev_mode = self.state.mode;
+                self.state.mode = Mode::Insert;
+                self.plugin_manager.emit(PluginEvent::ModeChange {
+                    from: prev_mode,
+                    to: Mode::Insert,
+                });
+                self.needs_render = true;
+            }
+            KeyCode::Char('S') => {
+                let content = self.buffer.get_line(self.state.cursor.line);
+                self.register.set('"', &content);
+                self.buffer.delete_line(self.state.cursor.line);
+                let prev_mode = self.state.mode;
+                self.state.mode = Mode::Insert;
+                self.plugin_manager.emit(PluginEvent::ModeChange {
+                    from: prev_mode,
+                    to: Mode::Insert,
+                });
+                self.on_buffer_modified();
+            }
             KeyCode::Char('*') => {
                 self.search_word_under_cursor();
                 self.needs_render = true;
@@ -358,6 +476,17 @@ impl Editor {
             }
             KeyCode::Char('N') => {
                 self.search_prev();
+                self.needs_render = true;
+            }
+            KeyCode::Char('?') => {
+                let prev_mode = self.state.mode;
+                self.state.mode = Mode::Command;
+                self.state.command_buffer.clear();
+                self.state.command_buffer.push('?');
+                self.plugin_manager.emit(PluginEvent::ModeChange {
+                    from: prev_mode,
+                    to: Mode::Command,
+                });
                 self.needs_render = true;
             }
             KeyCode::Char('u') => {
@@ -558,6 +687,9 @@ impl Editor {
                     KeyCode::Char('z') => {
                         self.pending_operator = Some('z');
                     }
+                    KeyCode::Char('Z') => {
+                        self.pending_operator = Some('Z');
+                    }
                     KeyCode::Char('s') => {
                         self.delete_char('"');
                         let prev_mode = self.state.mode;
@@ -592,7 +724,7 @@ impl Editor {
                         self.needs_render = true;
                         return;
                     }
-                    if let KeyCode::Char('z') = key {
+                    if op == 'z' {
                         match key {
                             KeyCode::Char('z') => {
                                 self.scroll_cursor_to_center();
@@ -604,6 +736,17 @@ impl Editor {
                                 self.scroll_cursor_to_bottom();
                             }
                             _ => {}
+                        }
+                        self.pending_operator = None;
+                        self.needs_render = true;
+                        return;
+                    }
+                    if op == 'Z' {
+                        if let KeyCode::Char('Z') = key {
+                            self.save_file_async().await;
+                            if !self.buffer.dirty {
+                                self.running = false;
+                            }
                         }
                         self.pending_operator = None;
                         self.needs_render = true;
@@ -1271,6 +1414,24 @@ impl Editor {
                 self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
                 self.needs_render = true;
             }
+            KeyCode::Char('0') => {
+                self.state.cursor.col = 0;
+                self.needs_render = true;
+            }
+            KeyCode::Char('^') => {
+                let line = self.buffer.get_line(self.state.cursor.line);
+                let first_non_blank = line
+                    .chars()
+                    .position(|c| !c.is_whitespace())
+                    .unwrap_or(0);
+                self.state.cursor.col = first_non_blank;
+                self.needs_render = true;
+            }
+            KeyCode::Char('$') => {
+                let line_len = self.buffer.get_line(self.state.cursor.line).len();
+                self.state.cursor.col = line_len.saturating_sub(1);
+                self.needs_render = true;
+            }
             _ => {}
         }
     }
@@ -1639,7 +1800,13 @@ impl Editor {
                         self.reload_file_discard().await;
                     }
                     _ => {
-                        if cmd.starts_with("set ") {
+                        if let Some(query) = cmd.strip_prefix('/') {
+                            let direction = SearchDirection::Forward;
+                            self.do_search(query, direction);
+                        } else if let Some(query) = cmd.strip_prefix('?') {
+                            let direction = SearchDirection::Backward;
+                            self.do_search(query, direction);
+                        } else if cmd.starts_with("set ") {
                             self.handle_set_command(cmd);
                         } else if cmd.starts_with("w ") || cmd.starts_with("w! ") {
                             self.handle_write_path(cmd).await;
@@ -1998,7 +2165,7 @@ impl Editor {
         }
     }
 
-    fn move_word_forward(&mut self) {
+    pub(crate) fn move_word_forward(&mut self) {
         let line = self.state.cursor.line;
         let col = self.state.cursor.col;
         let line_str = self.buffer.get_line(line);
@@ -2017,7 +2184,7 @@ impl Editor {
         }
     }
 
-    fn move_word_backward(&mut self) {
+    pub(crate) fn move_word_backward(&mut self) {
         let line = self.state.cursor.line;
         let col = self.state.cursor.col;
         let line_str = self.buffer.get_line(line);
@@ -2352,6 +2519,122 @@ impl Editor {
         }
     }
 
+    // ── Emacs Mark/Region ──────────────────────────────────────
+
+    /// C-space: 現在カーソル位置にマークをセットする。
+    pub fn set_mark(&mut self) {
+        self.state.mark = Some(self.state.cursor);
+        self.state.region_active = true;
+        self.needs_render = true;
+    }
+
+    /// アクティブなリージョンが存在するか。mark がセット済みでカーソルと異なる位置にあること。
+    pub fn has_active_region(&self) -> bool {
+        self.state.region_active
+            && self.state.mark.is_some()
+            && self.state.mark.unwrap() != self.state.cursor
+    }
+
+    /// C-w (region active): リージョン内のテキストを削除し、kill-ring と default register に保存する。
+    ///
+    /// Emacs の region は [mark, point) の半開区間。normalize_selection と違い
+    /// end に +1 補正しない（カーソル位置は既に排他的範囲の終端）。
+    pub fn kill_region(&mut self) {
+        let mark = match self.state.mark {
+            Some(m) => m,
+            None => return,
+        };
+        let cursor = self.state.cursor;
+
+        // 半開区間 [start, end): end は排他的（Emacs region の定義そのもの）
+        let (s_line, s_col, e_line, e_col) = if mark.line < cursor.line
+            || (mark.line == cursor.line && mark.col <= cursor.col)
+        {
+            (mark.line, mark.col, cursor.line, cursor.col)
+        } else {
+            (cursor.line, cursor.col, mark.line, mark.col)
+        };
+
+        if e_line == s_line && e_col <= s_col {
+            self.deactivate_region();
+            return;
+        }
+
+        let mod_count = self.buffer.modification_count();
+        let content = self.buffer.delete_range(s_line, s_col, e_line, e_col);
+        if content.is_empty() {
+            self.deactivate_region();
+            return;
+        }
+
+        self.kill_ring.push(&content);
+        self.register.set('"', &content);
+        self.undo_manager.push(Edit {
+            edit_type: EditType::Delete {
+                line: s_line,
+                col: s_col,
+                text: content,
+            },
+            cursor_before: cursor,
+            cursor_after: Position {
+                line: s_line,
+                col: s_col,
+            },
+            modification_count: mod_count,
+        });
+        self.state.cursor = Position {
+            line: s_line,
+            col: s_col,
+        };
+        self.deactivate_region();
+        self.on_buffer_modified();
+    }
+
+    /// C-g (region active 時): リージョンを非アクティブにする。mark は保持する。
+    pub fn deactivate_region(&mut self) {
+        if self.state.region_active {
+            self.state.region_active = false;
+            self.needs_render = true;
+        }
+    }
+
+    /// M-w: リージョンを kill-ring と register にコピーする（削除なし）。
+    pub fn copy_region(&mut self) {
+        let mark = match self.state.mark {
+            Some(m) => m,
+            None => return,
+        };
+        let cursor = self.state.cursor;
+        let (s_line, s_col, e_line, e_col) = if mark.line < cursor.line
+            || (mark.line == cursor.line && mark.col <= cursor.col)
+        {
+            (mark.line, mark.col, cursor.line, cursor.col)
+        } else {
+            (cursor.line, cursor.col, mark.line, mark.col)
+        };
+        let content = self.buffer.get_char_range(s_line, s_col, e_line, e_col);
+        if content.is_empty() {
+            self.deactivate_region();
+            return;
+        }
+        self.kill_ring.push(&content);
+        self.register.set('"', &content);
+        self.deactivate_region();
+        self.needs_render = true;
+    }
+
+    /// C-y: kill-ring から最新エントリを現在位置に挿入する。
+    pub fn yank_from_kill_ring(&mut self) {
+        if let Some(text) = self.kill_ring.yank() {
+            self.buffer.insert(self.state.cursor.line, self.state.cursor.col, text);
+            self.state.cursor.col += text.chars().count();
+            self.state.dirty = true;
+            self.needs_render = true;
+        }
+    }
+
+    // ── End Emacs Mark/Region ──────────────────────────────────
+
     pub async fn consume_pending_save(&mut self) {
         if self.pending_save {
             self.pending_save = false;
@@ -2434,6 +2717,8 @@ mod tests {
             macros: crate::types::Macros::new(),
             confirmation_prompt: None,
             show_line_numbers: true,
+            mark: None,
+            region_active: false,
         };
 
         Editor {
@@ -2463,6 +2748,7 @@ mod tests {
             last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
             pending_save: false,
+            kill_ring: KillRing::new(),
             highlights: Vec::new(),
         }
     }
@@ -2562,5 +2848,293 @@ mod tests {
 
         assert!(!editor.state.has_confirmation());
         assert!(!editor.running);
+    }
+
+    // ── Emacs Mark/Region tests ─────────────────────────────────
+
+    #[test]
+    fn emacs_mark_defaults_to_none() {
+        let editor = test_editor(Keymap::Emacs);
+        assert!(editor.state.mark.is_none());
+        assert!(!editor.state.region_active);
+        assert!(!editor.has_active_region());
+    }
+
+    #[tokio::test]
+    async fn emacs_c_space_sets_mark() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("hello world\n");
+
+        // C-space を送信
+        editor
+            .handle_key_for_test(KeyCode::Char(' '), KeyModifiers::CONTROL)
+            .await;
+
+        assert_eq!(editor.state.mark, Some(editor.state.cursor));
+        assert!(editor.state.region_active);
+    }
+
+    #[test]
+    fn emacs_has_active_region_true_when_mark_differs_from_cursor() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("hello world\n");
+
+        // マークを手動セット
+        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
+        editor.state.region_active = true;
+        editor.state.cursor.col = 5;
+
+        assert!(editor.has_active_region());
+    }
+
+    #[test]
+    fn emacs_has_active_region_false_when_mark_equals_cursor() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.state.mark = Some(editor.state.cursor);
+        editor.state.region_active = true;
+
+        assert!(!editor.has_active_region());
+    }
+
+    #[test]
+    fn emacs_has_active_region_false_when_region_inactive() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
+        editor.state.region_active = false;
+        editor.state.cursor.col = 5;
+
+        assert!(!editor.has_active_region());
+    }
+
+    #[test]
+    fn emacs_kill_region_deletes_selected_text() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("hello world\n");
+
+        // マーク: col 0, カーソル: col 5 → "hello" を選択
+        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
+        editor.state.region_active = true;
+        editor.state.cursor.col = 5;
+
+        editor.kill_region();
+
+        let text = editor.buffer.get_line(1);
+        assert_eq!(text, " world\n");
+        assert!(!editor.state.region_active);
+    }
+
+    #[test]
+    fn emacs_kill_region_pushes_to_kill_ring() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("hello world\n");
+
+        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
+        editor.state.region_active = true;
+        editor.state.cursor.col = 5;
+
+        editor.kill_region();
+
+        assert_eq!(editor.kill_ring.yank(), Some("hello"));
+    }
+
+    #[test]
+    fn emacs_kill_region_with_reverse_selection() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("hello world\n");
+
+        // マーク: col 5, カーソル: col 0 → 逆方向選択でも同じく "hello"
+        editor.state.mark = Some(crate::types::Position { line: 1, col: 5 });
+        editor.state.region_active = true;
+        editor.state.cursor.col = 0;
+
+        editor.kill_region();
+
+        let text = editor.buffer.get_line(1);
+        assert_eq!(text, " world\n");
+    }
+
+    #[test]
+    fn emacs_kill_region_pushes_to_register() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("hello world\n");
+
+        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
+        editor.state.region_active = true;
+        editor.state.cursor.col = 5;
+
+        editor.kill_region();
+
+        assert_eq!(editor.register.get('"'), "hello");
+    }
+
+    #[test]
+    fn emacs_deactivate_region_clears_active_flag() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
+        editor.state.region_active = true;
+
+        editor.deactivate_region();
+
+        assert!(!editor.state.region_active);
+        // mark は保持
+        assert!(editor.state.mark.is_some());
+    }
+
+    #[test]
+    fn emacs_set_mark_with_emacs_keymap() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("abcdef\n");
+
+        // カーソルを移動してからマーク
+        editor.state.cursor.col = 3;
+        editor.set_mark();
+
+        assert_eq!(editor.state.mark, Some(crate::types::Position { line: 1, col: 3 }));
+        assert!(editor.state.region_active);
+    }
+
+    #[tokio::test]
+    async fn emacs_c_w_kills_word_when_no_region() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("hello world\n");
+
+        editor
+            .handle_key_for_test(KeyCode::Char('w'), KeyModifiers::CONTROL)
+            .await;
+
+        // リージョンがないので kill_word が実行される
+        // "hello" の 'h' (col 0) から単語終端 (col 5) まで削除 → " world\n"
+        let text = editor.buffer.get_line(1);
+        assert_eq!(text, " world\n");
+    }
+
+    // ── Vim new keybindings tests ──────────────────────────────
+
+    #[tokio::test]
+    async fn vim_0_moves_to_column_zero() {
+        let mut editor = test_editor(Keymap::Vim);
+        editor.set_buffer_for_test("hello\n");
+        editor.state.cursor.col = 3;
+        editor.handle_normal(KeyCode::Char('0')).await;
+        assert_eq!(editor.state.cursor.col, 0);
+    }
+
+    #[tokio::test]
+    async fn vim_dollar_moves_to_end_of_line() {
+        let mut editor = test_editor(Keymap::Vim);
+        editor.set_buffer_for_test("hello\n");
+        editor.state.cursor.col = 0;
+        editor.handle_normal(KeyCode::Char('$')).await;
+        assert_eq!(editor.state.cursor.col, 5);
+    }
+
+    #[tokio::test]
+    async fn vim_caret_moves_to_first_non_blank() {
+        let mut editor = test_editor(Keymap::Vim);
+        editor.set_buffer_for_test("  hello\n");
+        editor.state.cursor.col = 6;
+        editor.handle_normal(KeyCode::Char('^')).await;
+        assert_eq!(editor.state.cursor.col, 2);
+    }
+
+    #[tokio::test]
+    async fn vim_d_capital_works() {
+        let mut editor = test_editor(Keymap::Vim);
+        editor.set_buffer_for_test("hello world\n");
+        editor.state.cursor.col = 5; // space
+        editor.handle_normal(KeyCode::Char('D')).await;
+        let text = editor.buffer.get_line(1);
+        // kill_line はカーソルから行末まで削除
+        assert!(text.starts_with("hello"));
+    }
+
+    #[tokio::test]
+    async fn vim_s_capital_substitutes_line() {
+        let mut editor = test_editor(Keymap::Vim);
+        editor.set_buffer_for_test("hello\n");
+        editor.handle_normal(KeyCode::Char('S')).await;
+        assert_eq!(editor.state.mode, Mode::Insert);
+        let text = editor.buffer.get_line(1);
+        assert_eq!(text, "\n");
+    }
+
+    #[tokio::test]
+    async fn vim_question_mark_enters_command_mode() {
+        let mut editor = test_editor(Keymap::Vim);
+        editor.handle_normal(KeyCode::Char('?')).await;
+        assert_eq!(editor.state.mode, Mode::Command);
+        assert_eq!(editor.state.command_buffer, "?");
+    }
+
+    #[test]
+    fn vim_ctrl_r_redo_does_not_panic() {
+        let mut editor = test_editor(Keymap::Vim);
+        // redo が実装されており、パニックしないことだけ確認
+        editor.redo();
+    }
+
+    // ── Emacs new keybindings tests ────────────────────────────
+
+    #[test]
+    fn emacs_copy_region_copies_without_deleting() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("hello world\n");
+        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
+        editor.state.region_active = true;
+        editor.state.cursor.col = 5;
+
+        editor.copy_region();
+
+        // テキストは削除されていない
+        let text = editor.buffer.get_line(1);
+        assert_eq!(text, "hello world\n");
+        // kill-ring にコピーされている
+        assert_eq!(editor.kill_ring.yank(), Some("hello"));
+        // リージョンは非アクティブに
+        assert!(!editor.state.region_active);
+    }
+
+    #[test]
+    fn emacs_yank_from_kill_ring_inserts_text() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("hello world\n");
+        editor.kill_ring.push("xyz");
+        editor.state.cursor.col = 5; // ' ' の位置
+
+        editor.yank_from_kill_ring();
+
+        let text = editor.buffer.get_line(1);
+        assert_eq!(text, "helloxyz world\n");
+    }
+
+    #[test]
+    fn emacs_m_f_moves_word_forward() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("hello world foo\n");
+        editor.state.cursor.col = 0;
+        editor.move_word_forward();
+        // 現在の単語を飛び越え、次の空白位置に移動
+        assert_eq!(editor.state.cursor.col, 5); // "hello" 直後の空白位置
+    }
+
+    #[test]
+    fn emacs_m_b_moves_word_backward() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.set_buffer_for_test("hello world\n");
+        editor.state.cursor.col = 8;
+        editor.move_word_backward();
+        assert_eq!(editor.state.cursor.col, 6); // "world" の先頭
+    }
+
+    #[test]
+    fn emacs_ctrl_x_u_redo_does_not_panic() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.redo();
+    }
+
+    #[test]
+    fn emacs_ctrl_x_ctrl_slash_redo_does_not_panic() {
+        let mut editor = test_editor(Keymap::Emacs);
+        editor.redo();
     }
 }

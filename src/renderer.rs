@@ -54,6 +54,22 @@ impl Renderer {
             0
         };
 
+        let mode_label = if state.region_active {
+            if state.mark == Some(state.cursor) {
+                " MARK "
+            } else {
+                " REGION "
+            }
+        } else {
+            match state.mode {
+                Mode::Normal => " NORMAL ",
+                Mode::Insert => " INSERT ",
+                Mode::Visual => " VISUAL ",
+                Mode::Command => " COMMAND ",
+                Mode::Replace => " REPLACE ",
+            }
+        };
+
         let status = if state.has_confirmation() {
             state.confirmation_prompt.as_ref().unwrap().message.clone()
         } else if state.mode == Mode::Command {
@@ -62,7 +78,8 @@ impl Renderer {
             let line = state.cursor.line;
             let col = state.cursor.col + 1;
             format!(
-                "-- REPLACE -- {} {}:{}",
+                "--{}-- {} {}:{}",
+                mode_label,
                 state
                     .file_path
                     .as_ref()
@@ -72,8 +89,8 @@ impl Renderer {
             )
         } else {
             format!(
-                "-- {} -- {} {}{}",
-                state.mode,
+                "--{}-- {} {}{}",
+                mode_label,
                 state
                     .file_path
                     .as_ref()

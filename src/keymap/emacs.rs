@@ -38,6 +38,7 @@ impl KeymapHandler for EmacsKeymap {
             }
 
             let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
+            let has_alt = modifiers.contains(KeyModifiers::ALT);
 
             if let KeyCode::Char(c) = key {
                 editor.plugin_manager.emit(PluginEvent::Key {
@@ -69,6 +70,17 @@ impl KeymapHandler for EmacsKeymap {
                         }
                         (true, KeyCode::Char('d')) => {
                             editor.cursor_line_end();
+                            return;
+                        }
+                        // C-x u / C-x C-/: redo
+                        (false, KeyCode::Char('u')) => {
+                            editor.redo();
+                            editor.needs_render = true;
+                            return;
+                        }
+                        (true, KeyCode::Char('/')) => {
+                            editor.redo();
+                            editor.needs_render = true;
                             return;
                         }
                         _ => {}
@@ -108,11 +120,18 @@ impl KeymapHandler for EmacsKeymap {
                 (true, KeyCode::Char('h')) => {
                     editor.delete_char_backward();
                 }
+                (true, KeyCode::Char(' ')) | (true, KeyCode::Char('@')) => {
+                    editor.set_mark();
+                }
                 (true, KeyCode::Char('w')) => {
-                    editor.kill_word();
+                    if editor.has_active_region() {
+                        editor.kill_region();
+                    } else {
+                        editor.kill_word();
+                    }
                 }
                 (true, KeyCode::Char('y')) => {
-                    editor.yank_pop();
+                    editor.yank_from_kill_ring();
                 }
                 (true, KeyCode::Char('o')) => {
                     // Spec decision: keep C-o as a legacy direct save trigger.
@@ -143,6 +162,7 @@ impl KeymapHandler for EmacsKeymap {
                     editor.scroll_cursor_to_center();
                 }
                 (true, KeyCode::Char('g')) => {
+                    editor.deactivate_region();
                     editor.abort();
                 }
                 (true, KeyCode::Char('/')) => {
@@ -193,7 +213,31 @@ impl KeymapHandler for EmacsKeymap {
                 (false, KeyCode::PageDown) => {
                     editor.scroll_down();
                 }
-                _ => {}
+                _ => {
+                    // Alt/Meta keybindings
+                    if has_alt {
+                        match key {
+                            KeyCode::Char('f') => {
+                                editor.move_word_forward();
+                                editor.needs_render = true;
+                            }
+                            KeyCode::Char('b') => {
+                                editor.move_word_backward();
+                                editor.needs_render = true;
+                            }
+                            KeyCode::Char('v') => {
+                                editor.scroll_down();
+                                editor.needs_render = true;
+                            }
+                            KeyCode::Char('w') => {
+                                if editor.has_active_region() {
+                                    editor.copy_region();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
         })
     }
