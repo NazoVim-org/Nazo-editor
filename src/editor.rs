@@ -208,6 +208,7 @@ impl Editor {
             macros: crate::types::Macros::new(),
             confirmation_prompt: None,
             show_line_numbers: true,
+            wrap: true,
             mark: None,
             region_active: false,
         };
@@ -260,6 +261,7 @@ impl Editor {
             macros: crate::types::Macros::new(),
             confirmation_prompt: None,
             show_line_numbers: true,
+            wrap: true,
             mark: None,
             region_active: false,
         };
@@ -276,10 +278,12 @@ impl Editor {
     pub async fn run(&mut self) -> io::Result<()> {
         self.running = true;
 
-        if let Err(e) = self
-            .renderer
-            .render(&mut self.terminal, &self.buffer, &self.state)
-        {
+        if let Err(e) = self.renderer.render(
+            &mut self.terminal,
+            &self.buffer,
+            &self.state,
+            &self.highlights,
+        ) {
             eprintln!("[render] error: {}", e);
         }
         self.needs_render = false;
@@ -320,10 +324,12 @@ impl Editor {
             }
 
             if self.needs_render {
-                if let Err(e) = self
-                    .renderer
-                    .render(&mut self.terminal, &self.buffer, &self.state)
-                {
+                if let Err(e) = self.renderer.render(
+                    &mut self.terminal,
+                    &self.buffer,
+                    &self.state,
+                    &self.highlights,
+                ) {
                     eprintln!("[render] error: {}", e);
                 }
                 self.needs_render = false;
@@ -2788,6 +2794,7 @@ mod tests {
             macros: crate::types::Macros::new(),
             confirmation_prompt: None,
             show_line_numbers: true,
+            wrap: true,
             mark: None,
             region_active: false,
         };

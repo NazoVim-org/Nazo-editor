@@ -69,6 +69,10 @@ impl Terminal {
         self.rows
     }
 
+    pub fn cols(&self) -> u16 {
+        self.cols
+    }
+
     pub fn move_cursor(&mut self, row: u16, col: u16) -> io::Result<()> {
         execute!(
             self.stdout,
@@ -109,6 +113,12 @@ impl Terminal {
     pub fn write_status(&mut self, content: &str) -> io::Result<()> {
         let row = self.rows.saturating_sub(1);
         self.write_line(row, content)
+    }
+
+    /// Write raw bytes to the terminal output buffer.
+    /// Used by ScreenBuffer-based rendering.
+    pub fn write_raw(&mut self, data: &[u8]) -> io::Result<()> {
+        self.stdout.write_all(data)
     }
 
     pub fn flush(&mut self) -> io::Result<()> {
