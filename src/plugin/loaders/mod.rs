@@ -72,7 +72,6 @@ impl LoaderRegistry {
 
         Err(LoaderError::UnsupportedLanguage(ext.to_string()))
     }
-
 }
 
 impl Default for LoaderRegistry {

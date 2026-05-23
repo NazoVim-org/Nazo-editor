@@ -212,7 +212,13 @@ impl Editor {
             region_active: false,
         };
 
-        Ok(Editor::new_shared(terminal, buffer, PluginManager::new(), state, keymap))
+        Ok(Editor::new_shared(
+            terminal,
+            buffer,
+            PluginManager::new(),
+            state,
+            keymap,
+        ))
     }
 
     pub async fn new(
@@ -259,7 +265,13 @@ impl Editor {
         };
 
 
-        Ok(Editor::new_shared(terminal, buffer, plugin_manager, state, keymap))
+        Ok(Editor::new_shared(
+            terminal,
+            buffer,
+            plugin_manager,
+            state,
+            keymap,
+        ))
     }
 
     pub async fn run(&mut self) -> io::Result<()> {
@@ -357,7 +369,8 @@ impl Editor {
                     self.handle_text_object(key, pto.register, pto.inner).await;
                 }
                 'c' => {
-                    self.handle_text_object_change(key, pto.register, pto.inner).await;
+                    self.handle_text_object_change(key, pto.register, pto.inner)
+                        .await;
                 }
                 _ => {}
             }
@@ -808,10 +821,18 @@ impl Editor {
                     self.yank_word_end(register);
                 }
                 KeyCode::Char('i') => {
-                    self.pending_text_object = Some(PendingTextObject { operator: 'y', register, inner: true });
+                    self.pending_text_object = Some(PendingTextObject {
+                        operator: 'y',
+                        register,
+                        inner: true,
+                    });
                 }
                 KeyCode::Char('a') => {
-                    self.pending_text_object = Some(PendingTextObject { operator: 'y', register, inner: false });
+                    self.pending_text_object = Some(PendingTextObject {
+                        operator: 'y',
+                        register,
+                        inner: false,
+                    });
                 }
                 _ => {}
             },
@@ -824,10 +845,18 @@ impl Editor {
                 }
                 KeyCode::Char('i') => {
                     // Defer to pending_text_object — next key is the target
-                    self.pending_text_object = Some(PendingTextObject { operator: 'd', register, inner: true });
+                    self.pending_text_object = Some(PendingTextObject {
+                        operator: 'd',
+                        register,
+                        inner: true,
+                    });
                 }
                 KeyCode::Char('a') => {
-                    self.pending_text_object = Some(PendingTextObject { operator: 'd', register, inner: false });
+                    self.pending_text_object = Some(PendingTextObject {
+                        operator: 'd',
+                        register,
+                        inner: false,
+                    });
                 }
                 _ => {}
             },
@@ -880,10 +909,18 @@ impl Editor {
                     }
                 }
                 KeyCode::Char('i') => {
-                    self.pending_text_object = Some(PendingTextObject { operator: 'c', register, inner: true });
+                    self.pending_text_object = Some(PendingTextObject {
+                        operator: 'c',
+                        register,
+                        inner: true,
+                    });
                 }
                 KeyCode::Char('a') => {
-                    self.pending_text_object = Some(PendingTextObject { operator: 'c', register, inner: false });
+                    self.pending_text_object = Some(PendingTextObject {
+                        operator: 'c',
+                        register,
+                        inner: false,
+                    });
                 }
                 _ => {}
             },
@@ -1022,29 +1059,29 @@ impl Editor {
                             modification_count: mod_count,
                         });
                     }
-                    } else {
-                        let (word, start, end) = self
-                            .buffer
-                            .get_word_range(self.state.cursor.line, self.state.cursor.col);
-                        if !word.is_empty() {
-                            let line = self.buffer.get_line(self.state.cursor.line);
-                            let line_chars: Vec<char> = line.chars().collect();
-                            let mut aw_start = start;
-                            while aw_start > 0 {
-                                if line_chars[aw_start - 1] == ' ' || line_chars[aw_start - 1] == '\t' {
-                                    aw_start -= 1;
-                                } else {
-                                    break;
-                                }
+                } else {
+                    let (word, start, end) = self
+                        .buffer
+                        .get_word_range(self.state.cursor.line, self.state.cursor.col);
+                    if !word.is_empty() {
+                        let line = self.buffer.get_line(self.state.cursor.line);
+                        let line_chars: Vec<char> = line.chars().collect();
+                        let mut aw_start = start;
+                        while aw_start > 0 {
+                            if line_chars[aw_start - 1] == ' ' || line_chars[aw_start - 1] == '\t' {
+                                aw_start -= 1;
+                            } else {
+                                break;
                             }
-                            let mut aw_end = end;
-                            while aw_end < line_chars.len() {
-                                if line_chars[aw_end] == ' ' || line_chars[aw_end] == '\t' {
-                                    aw_end += 1;
-                                } else {
-                                    break;
-                                }
+                        }
+                        let mut aw_end = end;
+                        while aw_end < line_chars.len() {
+                            if line_chars[aw_end] == ' ' || line_chars[aw_end] == '\t' {
+                                aw_end += 1;
+                            } else {
+                                break;
                             }
+                        }
                         let char_start =
                             self.buffer.line_to_char(self.state.cursor.line - 1) + aw_start;
                         let char_end = char_start + (aw_end - aw_start);
@@ -1531,7 +1568,8 @@ impl Editor {
                 // Push accumulated insert text as a single undo group
                 if !self.insert_accum.is_empty() {
                     let text = std::mem::take(&mut self.insert_accum);
-                    let cursor_before = self.insert_start_pos
+                    let cursor_before = self
+                        .insert_start_pos
                         .unwrap_or(crate::types::Position { line: 1, col: 0 });
                     self.insert_start_pos = None;
                     let mod_count = self.buffer.modification_count();

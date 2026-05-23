@@ -97,11 +97,9 @@ impl PluginManager {
             false
         }
     }
-
     pub fn add_plugin(&mut self, plugin: Box<dyn Plugin>) {
         self.plugins.push(plugin);
     }
-
 }
 
 impl Default for PluginManager {
