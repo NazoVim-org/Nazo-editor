@@ -429,10 +429,7 @@ impl Editor {
             }
             KeyCode::Char('^') => {
                 let line = self.buffer.get_line(self.state.cursor.line);
-                let first_non_blank = line
-                    .chars()
-                    .position(|c| !c.is_whitespace())
-                    .unwrap_or(0);
+                let first_non_blank = line.chars().position(|c| !c.is_whitespace()).unwrap_or(0);
                 self.state.cursor.col = first_non_blank;
                 self.needs_render = true;
             }
@@ -1420,10 +1417,7 @@ impl Editor {
             }
             KeyCode::Char('^') => {
                 let line = self.buffer.get_line(self.state.cursor.line);
-                let first_non_blank = line
-                    .chars()
-                    .position(|c| !c.is_whitespace())
-                    .unwrap_or(0);
+                let first_non_blank = line.chars().position(|c| !c.is_whitespace()).unwrap_or(0);
                 self.state.cursor.col = first_non_blank;
                 self.needs_render = true;
             }
@@ -2547,13 +2541,12 @@ impl Editor {
         let cursor = self.state.cursor;
 
         // 半開区間 [start, end): end は排他的（Emacs region の定義そのもの）
-        let (s_line, s_col, e_line, e_col) = if mark.line < cursor.line
-            || (mark.line == cursor.line && mark.col <= cursor.col)
-        {
-            (mark.line, mark.col, cursor.line, cursor.col)
-        } else {
-            (cursor.line, cursor.col, mark.line, mark.col)
-        };
+        let (s_line, s_col, e_line, e_col) =
+            if mark.line < cursor.line || (mark.line == cursor.line && mark.col <= cursor.col) {
+                (mark.line, mark.col, cursor.line, cursor.col)
+            } else {
+                (cursor.line, cursor.col, mark.line, mark.col)
+            };
 
         if e_line == s_line && e_col <= s_col {
             self.deactivate_region();
@@ -2605,13 +2598,12 @@ impl Editor {
             None => return,
         };
         let cursor = self.state.cursor;
-        let (s_line, s_col, e_line, e_col) = if mark.line < cursor.line
-            || (mark.line == cursor.line && mark.col <= cursor.col)
-        {
-            (mark.line, mark.col, cursor.line, cursor.col)
-        } else {
-            (cursor.line, cursor.col, mark.line, mark.col)
-        };
+        let (s_line, s_col, e_line, e_col) =
+            if mark.line < cursor.line || (mark.line == cursor.line && mark.col <= cursor.col) {
+                (mark.line, mark.col, cursor.line, cursor.col)
+            } else {
+                (cursor.line, cursor.col, mark.line, mark.col)
+            };
         let content = self.buffer.get_char_range(s_line, s_col, e_line, e_col);
         if content.is_empty() {
             self.deactivate_region();
@@ -2626,7 +2618,8 @@ impl Editor {
     /// C-y: kill-ring から最新エントリを現在位置に挿入する。
     pub fn yank_from_kill_ring(&mut self) {
         if let Some(text) = self.kill_ring.yank() {
-            self.buffer.insert(self.state.cursor.line, self.state.cursor.col, text);
+            self.buffer
+                .insert(self.state.cursor.line, self.state.cursor.col, text);
             self.state.cursor.col += text.chars().count();
             self.state.dirty = true;
             self.needs_render = true;
@@ -2989,7 +2982,10 @@ mod tests {
         editor.state.cursor.col = 3;
         editor.set_mark();
 
-        assert_eq!(editor.state.mark, Some(crate::types::Position { line: 1, col: 3 }));
+        assert_eq!(
+            editor.state.mark,
+            Some(crate::types::Position { line: 1, col: 3 })
+        );
         assert!(editor.state.region_active);
     }
 
