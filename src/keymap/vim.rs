@@ -55,11 +55,9 @@ impl KeymapHandler for VimKeymap {
                             editor.needs_render = true;
                             return;
                         }
-                        KeyCode::Char('r') => {
-                            if editor.state.mode == Mode::Normal {
-                                editor.redo();
-                                return;
-                            }
+                        KeyCode::Char('r') if editor.state.mode == Mode::Normal => {
+                            editor.redo();
+                            return;
                         }
                         _ => {}
                     },

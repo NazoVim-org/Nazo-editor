@@ -229,10 +229,8 @@ impl KeymapHandler for EmacsKeymap {
                                 editor.scroll_down();
                                 editor.needs_render = true;
                             }
-                            KeyCode::Char('w') => {
-                                if editor.has_active_region() {
-                                    editor.copy_region();
-                                }
+                            KeyCode::Char('w') if editor.has_active_region() => {
+                                editor.copy_region();
                             }
                             _ => {}
                         }
