@@ -36,6 +36,7 @@ pub struct Editor {
     pub(crate) pending_register: Option<char>,
     pub(crate) pending_mark: Option<char>,
     pub(crate) pending_macro_play: Option<char>,
+    pub(crate) pending_text_object: Option<PendingTextObject>,
     pub(crate) search_query: String,
     pub(crate) search_direction: SearchDirection,
     pub(crate) search_results: Vec<SearchResult>,
@@ -48,12 +49,18 @@ pub struct Editor {
     pub(crate) pending_save: bool,
     pub(crate) highlights: Vec<Vec<(Style, String)>>,
     pub(crate) kill_ring: KillRing,
+    /// Accumulated characters typed during the current insert-mode session.
+    /// Used to push a single undo-group when leaving insert mode.
+    insert_accum: String,
+    /// Cursor position when insert mode was entered (for undo cursor_before).
+    insert_start_pos: Option<crate::types::Position>,
 }
 
-/// 循環 kill-ring: Emacs の kill 履歴を保持する。
-/// - push(): 最新エントリを先頭に追加（最大 MAX_ENTRIES）
-/// - yank(): 最新エントリを取得
-/// - yank_pop(): 一つ前のエントリに戻る（将来 M-y 用）
+/// Cyclic kill-ring: holds Emacs kill history entries.
+/// - push(): insert newest entry at front (up to MAX_ENTRIES)
+/// - yank(): get the newest entry
+/// - yank_pop(): cycle to the previous entry (for future M-y)
+#[derive(Clone)]
 pub(crate) struct KillRing {
     entries: Vec<String>,
     index: usize,
@@ -119,6 +126,13 @@ impl Default for KillRing {
 }
 
 #[derive(Clone)]
+pub(crate) struct PendingTextObject {
+    pub operator: char,
+    pub register: char,
+    pub inner: bool,
+}
+
+#[derive(Clone)]
 pub(crate) enum DotAction {
     Insert {
         text: String,
@@ -136,14 +150,52 @@ pub(crate) enum DotAction {
 }
 
 impl Editor {
+    /// Shared struct literal construction — both public constructors delegate here.
+    fn new_shared(
+        terminal: Terminal,
+        buffer: TextBuffer,
+        plugin_manager: PluginManager,
+        state: EditorState,
+        keymap: Keymap,
+    ) -> Self {
+        Self {
+            terminal,
+            buffer,
+            highlighter: Highlighter::new(),
+            renderer: Renderer::new(),
+            plugin_manager,
+            register: Register::new(),
+            undo_manager: UndoManager::new(),
+            state,
+            running: false,
+            last_highlight_mod_count: 0,
+            last_keypress_time: Instant::now(),
+            needs_render: true,
+            pending_operator: None,
+            pending_register: None,
+            pending_mark: None,
+            pending_macro_play: None,
+            pending_text_object: None,
+            search_query: String::new(),
+            search_direction: SearchDirection::Forward,
+            search_results: Vec::new(),
+            current_search_idx: 0,
+            dot_last_action: None,
+            replace_char: None,
+            last_fchar: None,
+            last_fchar_till: false,
+            keymap_handler: create_keymap(keymap),
+            pending_save: false,
+            highlights: Vec::new(),
+            insert_accum: String::new(),
+            insert_start_pos: None,
+            kill_ring: KillRing::new(),
+        }
+    }
+
     pub fn new_headless_for_test(keymap: Keymap) -> Result<Self, Box<dyn std::error::Error>> {
         let terminal = Terminal::new()?;
         let buffer = TextBuffer::new();
-        let highlighter = Highlighter::new();
-        let plugin_manager = PluginManager::new();
-        let renderer = Renderer::new();
-        let register = Register::new();
-        let undo_manager = UndoManager::new();
         let state = EditorState {
             mode: Mode::Normal,
             cursor: crate::types::Position { line: 1, col: 0 },
@@ -160,46 +212,14 @@ impl Editor {
             region_active: false,
         };
 
-        Ok(Self {
-            terminal,
-            buffer,
-            highlighter,
-            renderer,
-            plugin_manager,
-            register,
-            undo_manager,
-            state,
-            running: false,
-            last_highlight_mod_count: 0,
-            last_keypress_time: Instant::now(),
-            needs_render: true,
-            pending_operator: None,
-            pending_register: None,
-            pending_mark: None,
-            pending_macro_play: None,
-            search_query: String::new(),
-            search_direction: SearchDirection::Forward,
-            search_results: Vec::new(),
-            current_search_idx: 0,
-            dot_last_action: None,
-            replace_char: None,
-            last_fchar: None,
-            last_fchar_till: false,
-            keymap_handler: create_keymap(keymap),
-            pending_save: false,
-            kill_ring: KillRing::new(),
-            highlights: Vec::new(),
-        })
+        Ok(Editor::new_shared(terminal, buffer, PluginManager::new(), state, keymap))
     }
 
     pub async fn new(
         file_path: Option<&str>,
         keymap: Keymap,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // 既存のまま
-
         let mut terminal = Terminal::new()?;
-
         terminal.enable_raw_mode()?;
 
         let buffer = if let Some(path) = file_path {
@@ -217,18 +237,10 @@ impl Editor {
             TextBuffer::new()
         };
 
-        let highlighter = Highlighter::new();
-
         let mut plugin_manager = PluginManager::new();
         if let Err(e) = plugin_manager.load_all() {
             eprintln!("Plugin loading warning: {}", e);
         }
-
-        let renderer = Renderer::new();
-
-        let register = Register::new();
-
-        let undo_manager = UndoManager::new();
 
         let state = EditorState {
             mode: Mode::Normal,
@@ -246,36 +258,8 @@ impl Editor {
             region_active: false,
         };
 
-        Ok(Self {
-            terminal,
-            buffer,
-            highlighter,
-            renderer,
-            plugin_manager,
-            register,
-            undo_manager,
-            state,
-            running: false,
-            last_highlight_mod_count: 0,
-            last_keypress_time: Instant::now(),
-            needs_render: true,
-            pending_operator: None,
-            pending_register: None,
-            pending_mark: None,
-            pending_macro_play: None,
-            search_query: String::new(),
-            search_direction: SearchDirection::Forward,
-            search_results: Vec::new(),
-            current_search_idx: 0,
-            dot_last_action: None,
-            replace_char: None,
-            last_fchar: None,
-            last_fchar_till: false,
-            keymap_handler: create_keymap(keymap),
-            pending_save: false,
-            kill_ring: KillRing::new(),
-            highlights: Vec::new(),
-        })
+
+        Ok(Editor::new_shared(terminal, buffer, plugin_manager, state, keymap))
     }
 
     pub async fn run(&mut self) -> io::Result<()> {
@@ -349,7 +333,9 @@ impl Editor {
             .await;
     }
 
-    pub(crate) fn vim_on_key_event(&mut self, key: KeyCode) {
+    /// Emit a key-press event to the plugin system and record macros if recording.
+    /// Called by both Vim and Emacs keymap handlers.
+    pub(crate) fn emit_key_event(&mut self, key: KeyCode) {
         if let KeyCode::Char(c) = key {
             self.plugin_manager.emit(PluginEvent::Key {
                 mode: self.state.mode,
@@ -364,6 +350,20 @@ impl Editor {
     }
 
     pub(crate) async fn handle_normal(&mut self, key: KeyCode) {
+        // Resolve 3-key operator sequences (e.g., diw, da(, ciw)
+        if let Some(pto) = self.pending_text_object.take() {
+            match pto.operator {
+                'y' | 'd' => {
+                    self.handle_text_object(key, pto.register, pto.inner).await;
+                }
+                'c' => {
+                    self.handle_text_object_change(key, pto.register, pto.inner).await;
+                }
+                _ => {}
+            }
+            return;
+        }
+
         let line_count = self.buffer.line_count();
 
         if let Some(op) = self.pending_operator {
@@ -395,6 +395,8 @@ impl Editor {
             }
             KeyCode::Char('i') => {
                 let prev_mode = self.state.mode;
+                self.insert_accum.clear();
+                self.insert_start_pos = Some(self.state.cursor);
                 self.state.mode = Mode::Insert;
                 self.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
@@ -806,10 +808,10 @@ impl Editor {
                     self.yank_word_end(register);
                 }
                 KeyCode::Char('i') => {
-                    self.handle_text_object(key, register, true).await;
+                    self.pending_text_object = Some(PendingTextObject { operator: 'y', register, inner: true });
                 }
                 KeyCode::Char('a') => {
-                    self.handle_text_object(key, register, false).await;
+                    self.pending_text_object = Some(PendingTextObject { operator: 'y', register, inner: false });
                 }
                 _ => {}
             },
@@ -821,10 +823,11 @@ impl Editor {
                     self.delete_word(register);
                 }
                 KeyCode::Char('i') => {
-                    self.handle_text_object(key, register, true).await;
+                    // Defer to pending_text_object — next key is the target
+                    self.pending_text_object = Some(PendingTextObject { operator: 'd', register, inner: true });
                 }
                 KeyCode::Char('a') => {
-                    self.handle_text_object(key, register, false).await;
+                    self.pending_text_object = Some(PendingTextObject { operator: 'd', register, inner: false });
                 }
                 _ => {}
             },
@@ -877,10 +880,10 @@ impl Editor {
                     }
                 }
                 KeyCode::Char('i') => {
-                    self.handle_text_object_change(key, register, true).await;
+                    self.pending_text_object = Some(PendingTextObject { operator: 'c', register, inner: true });
                 }
                 KeyCode::Char('a') => {
-                    self.handle_text_object_change(key, register, false).await;
+                    self.pending_text_object = Some(PendingTextObject { operator: 'c', register, inner: false });
                 }
                 _ => {}
             },
@@ -1005,33 +1008,43 @@ impl Editor {
                             self.state.cursor.line,
                             start + word.len(),
                         );
+                        let mod_count = self.buffer.modification_count();
                         self.register.set(register, &content);
                         self.buffer.remove_range(char_start, char_end);
+                        self.undo_manager.push(Edit {
+                            edit_type: EditType::Delete {
+                                line: self.state.cursor.line,
+                                col: start,
+                                text: content,
+                            },
+                            cursor_before: self.state.cursor,
+                            cursor_after: self.state.cursor,
+                            modification_count: mod_count,
+                        });
                     }
-                } else {
-                    let (word, start, end) = self
-                        .buffer
-                        .get_word_range(self.state.cursor.line, self.state.cursor.col);
-                    if !word.is_empty() {
-                        let line = self.buffer.get_line(self.state.cursor.line);
-                        let mut aw_start = start;
-                        while aw_start > 0 {
-                            let prev_char = line.chars().nth(aw_start - 1);
-                            if prev_char == Some(' ') || prev_char == Some('\t') {
-                                aw_start -= 1;
-                            } else {
-                                break;
+                    } else {
+                        let (word, start, end) = self
+                            .buffer
+                            .get_word_range(self.state.cursor.line, self.state.cursor.col);
+                        if !word.is_empty() {
+                            let line = self.buffer.get_line(self.state.cursor.line);
+                            let line_chars: Vec<char> = line.chars().collect();
+                            let mut aw_start = start;
+                            while aw_start > 0 {
+                                if line_chars[aw_start - 1] == ' ' || line_chars[aw_start - 1] == '\t' {
+                                    aw_start -= 1;
+                                } else {
+                                    break;
+                                }
                             }
-                        }
-                        let mut aw_end = end;
-                        while aw_end < line.len() {
-                            let next_char = line.chars().nth(aw_end);
-                            if next_char == Some(' ') || next_char == Some('\t') {
-                                aw_end += 1;
-                            } else {
-                                break;
+                            let mut aw_end = end;
+                            while aw_end < line_chars.len() {
+                                if line_chars[aw_end] == ' ' || line_chars[aw_end] == '\t' {
+                                    aw_end += 1;
+                                } else {
+                                    break;
+                                }
                             }
-                        }
                         let char_start =
                             self.buffer.line_to_char(self.state.cursor.line - 1) + aw_start;
                         let char_end = char_start + (aw_end - aw_start);
@@ -1041,8 +1054,19 @@ impl Editor {
                             self.state.cursor.line,
                             aw_end,
                         );
+                        let mod_count = self.buffer.modification_count();
                         self.register.set(register, &content);
                         self.buffer.remove_range(char_start, char_end);
+                        self.undo_manager.push(Edit {
+                            edit_type: EditType::Delete {
+                                line: self.state.cursor.line,
+                                col: aw_start,
+                                text: content,
+                            },
+                            cursor_before: self.state.cursor,
+                            cursor_after: self.state.cursor,
+                            modification_count: mod_count,
+                        });
                     }
                 }
             }
@@ -1070,19 +1094,20 @@ impl Editor {
 
     fn handle_quote_text_object(&mut self, register: char, quote: char, inner: bool) {
         let line = self.buffer.get_line(self.state.cursor.line);
+        let chars: Vec<char> = line.chars().collect();
         let col = self.state.cursor.col;
 
         let mut open_pos: Option<usize> = None;
         for i in (0..col).rev() {
-            if line.chars().nth(i) == Some(quote) {
+            if chars[i] == quote {
                 open_pos = Some(i);
                 break;
             }
         }
 
         let mut close_pos: Option<usize> = None;
-        for i in (col + 1)..line.len() {
-            if line.chars().nth(i) == Some(quote) {
+        for (i, &c) in chars.iter().enumerate().skip(col + 1) {
+            if c == quote {
                 close_pos = Some(i);
                 break;
             }
@@ -1096,17 +1121,24 @@ impl Editor {
                     (start, end + 1)
                 };
 
-                let content: String = line
-                    .chars()
-                    .skip(content_start)
-                    .take(content_end - content_start)
-                    .collect();
+                let content: String = chars[content_start..content_end].iter().collect();
                 let char_start =
                     self.buffer.line_to_char(self.state.cursor.line - 1) + content_start;
                 let char_end = char_start + content.len();
+                let mod_count = self.buffer.modification_count();
 
                 self.register.set(register, &content);
                 self.buffer.remove_range(char_start, char_end);
+                self.undo_manager.push(Edit {
+                    edit_type: EditType::Delete {
+                        line: self.state.cursor.line,
+                        col: content_start,
+                        text: content,
+                    },
+                    cursor_before: self.state.cursor,
+                    cursor_after: self.state.cursor,
+                    modification_count: mod_count,
+                });
             }
         }
     }
@@ -1117,12 +1149,12 @@ impl Editor {
         let mut open_pos: Option<usize> = None;
         let mut open_line = self.state.cursor.line;
         for l in (1..=self.state.cursor.line).rev() {
-            let l_str = self.buffer.get_line(l);
-            for i in (0..l_str.len()).rev() {
+            let l_chars: Vec<char> = self.buffer.get_line(l).chars().collect();
+            for i in (0..l_chars.len()).rev() {
                 if l == self.state.cursor.line && i >= col {
                     continue;
                 }
-                if l_str.chars().nth(i) == Some(open) {
+                if l_chars[i] == open {
                     open_pos = Some(i);
                     open_line = l;
                     break;
@@ -1136,12 +1168,12 @@ impl Editor {
         let mut close_pos: Option<usize> = None;
         let mut close_line = self.state.cursor.line;
         for l in self.state.cursor.line..=self.buffer.line_count() {
-            let l_str = self.buffer.get_line(l);
-            for i in 0..l_str.len() {
+            let l_chars: Vec<char> = self.buffer.get_line(l).chars().collect();
+            for (i, &c) in l_chars.iter().enumerate() {
                 if l == self.state.cursor.line && i <= col {
                     continue;
                 }
-                if l_str.chars().nth(i) == Some(close) {
+                if c == close {
                     close_pos = Some(i);
                     close_line = l;
                     break;
@@ -1169,39 +1201,38 @@ impl Editor {
 
                 let mut content = String::new();
                 if open_line == close_line {
-                    let line_str = self.buffer.get_line(open_line);
-                    content = line_str
-                        .chars()
-                        .skip(content_start)
-                        .take(content_end - content_start)
-                        .collect();
+                    let line_chars: Vec<char> = self.buffer.get_line(open_line).chars().collect();
+                    content = line_chars[content_start..content_end].iter().collect();
                 } else {
-                    content.push_str(
-                        &self
-                            .buffer
-                            .get_line(open_line)
-                            .chars()
-                            .skip(content_start)
-                            .take(usize::MAX)
-                            .collect::<String>(),
-                    );
+                    let open_chars: Vec<char> = self.buffer.get_line(open_line).chars().collect();
+                    content.push_str(&open_chars[content_start..].iter().collect::<String>());
                     content.push('\n');
                     for l in (open_line + 1)..close_line {
                         content.push_str(&self.buffer.get_line(l));
                         content.push('\n');
                     }
-                    content.push_str(
-                        &self
-                            .buffer
-                            .get_line(close_line)
-                            .chars()
-                            .take(content_end)
-                            .collect::<String>(),
-                    );
+                    let close_chars: Vec<char> = self.buffer.get_line(close_line).chars().collect();
+                    content.push_str(&close_chars[..content_end].iter().collect::<String>());
                 }
 
+                let mod_count = self.buffer.modification_count();
                 self.register.set(register, &content);
                 self.buffer.remove_range(start_char_idx, end_char_idx);
+
+                // Position cursor at the start of the deleted range
+                self.state.cursor.line = open_line;
+                self.state.cursor.col = content_start;
+
+                self.undo_manager.push(Edit {
+                    edit_type: EditType::Delete {
+                        line: open_line,
+                        col: content_start,
+                        text: content,
+                    },
+                    cursor_before: self.state.cursor,
+                    cursor_after: self.state.cursor,
+                    modification_count: mod_count,
+                });
             }
         }
     }
@@ -1494,14 +1525,28 @@ impl Editor {
         }
     }
 
-    #[allow(dead_code)]
-    fn line_to_char(&self, line_idx: usize) -> usize {
-        self.buffer.line_to_char(line_idx)
-    }
-
     pub(crate) async fn handle_insert(&mut self, key: KeyCode) {
         match key {
             KeyCode::Esc => {
+                // Push accumulated insert text as a single undo group
+                if !self.insert_accum.is_empty() {
+                    let text = std::mem::take(&mut self.insert_accum);
+                    let cursor_before = self.insert_start_pos
+                        .unwrap_or(crate::types::Position { line: 1, col: 0 });
+                    self.insert_start_pos = None;
+                    let mod_count = self.buffer.modification_count();
+                    self.undo_manager.push(Edit {
+                        edit_type: EditType::Insert {
+                            line: cursor_before.line,
+                            col: cursor_before.col,
+                            text,
+                        },
+                        cursor_before,
+                        cursor_after: self.state.cursor,
+                        modification_count: mod_count,
+                    });
+                }
+                self.insert_start_pos = None;
                 self.transition_mode(Mode::Normal);
                 self.state.cursor.col = self.state.cursor.col.saturating_sub(1);
                 self.needs_render = true;
@@ -1511,11 +1556,14 @@ impl Editor {
                     self.buffer
                         .delete(self.state.cursor.line, self.state.cursor.col - 1);
                     self.state.cursor.col -= 1;
+                    self.insert_accum.pop();
                     self.on_buffer_modified();
                 } else if self.state.cursor.line > 1 {
                     let new_col = self.buffer.merge_with_prev_line(self.state.cursor.line);
                     self.state.cursor.line -= 1;
                     self.state.cursor.col = new_col;
+                    // Remove the last newline from accumulator
+                    self.insert_accum.pop();
                     self.on_buffer_modified();
                 }
             }
@@ -1524,12 +1572,14 @@ impl Editor {
                     .insert(self.state.cursor.line, self.state.cursor.col, "\n");
                 self.state.cursor.line += 1;
                 self.state.cursor.col = 0;
+                self.insert_accum.push('\n');
                 self.on_buffer_modified();
             }
             KeyCode::Char(c) => {
                 self.buffer
                     .insert_char(self.state.cursor.line, self.state.cursor.col, c);
                 self.state.cursor.col += 1;
+                self.insert_accum.push(c);
                 self.on_buffer_modified();
             }
             _ => {}
@@ -1556,7 +1606,6 @@ impl Editor {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn redo(&mut self) {
         if let Some(edit) = self.undo_manager.redo(&mut self.buffer) {
             self.state.cursor = edit.cursor_after;
@@ -1595,11 +1644,12 @@ impl Editor {
 
     fn find_char(&mut self, ch: char, till: bool, forward: bool) -> bool {
         let line = self.buffer.get_line(self.state.cursor.line);
+        let chars: Vec<char> = line.chars().collect();
         let start_col = self.state.cursor.col;
 
         if forward {
-            for i in (start_col + 1)..line.len() {
-                if line.chars().nth(i) == Some(ch) {
+            for (i, &c) in chars.iter().enumerate().skip(start_col + 1) {
+                if c == ch {
                     if till {
                         self.state.cursor.col = i.saturating_sub(1);
                     } else {
@@ -1610,9 +1660,9 @@ impl Editor {
             }
         } else {
             for i in (0..start_col).rev() {
-                if line.chars().nth(i) == Some(ch) {
+                if chars[i] == ch {
                     if till {
-                        self.state.cursor.col = (i + 1).min(line.len().saturating_sub(1));
+                        self.state.cursor.col = (i + 1).min(chars.len().saturating_sub(1));
                     } else {
                         self.state.cursor.col = i;
                     }
@@ -2011,8 +2061,7 @@ impl Editor {
         }
     }
 
-    #[allow(dead_code)]
-    fn page_down(&mut self) {
+    pub(crate) fn page_down(&mut self) {
         let terminal_rows = self.terminal.rows() as usize;
         let line_count = self.buffer.line_count();
         self.state.cursor.line = (self.state.cursor.line + terminal_rows)
@@ -2022,36 +2071,32 @@ impl Editor {
         self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
     }
 
-    #[allow(dead_code)]
-    fn page_up(&mut self) {
+    pub(crate) fn page_up(&mut self) {
         let terminal_rows = self.terminal.rows() as usize;
         self.state.cursor.line = self.state.cursor.line.saturating_sub(terminal_rows).max(1);
         let len = self.buffer.get_line(self.state.cursor.line).len();
         self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
     }
 
-    pub(crate) fn scroll_by(&mut self, lines: usize) {
-        if self.state.cursor.line > lines {
-            self.state.cursor.line -= lines;
+    pub(crate) fn scroll_by(&mut self, lines: usize, forward: bool) {
+        let line_count = self.buffer.line_count();
+        if forward {
+            self.state.cursor.line = (self.state.cursor.line + lines).min(line_count).max(1);
         } else {
-            self.state.cursor.line = 1;
+            self.state.cursor.line = self.state.cursor.line.saturating_sub(lines).max(1);
         }
     }
 
     fn jump_to_matching_bracket(&mut self) {
         let line = self.state.cursor.line;
         let col = self.state.cursor.col;
-        let line_str = self.buffer.get_line(line);
+        let line_chars: Vec<char> = self.buffer.get_line(line).chars().collect();
 
-        if col >= line_str.len() {
+        if col >= line_chars.len() {
             return;
         }
 
-        let ch = line_str.chars().nth(col);
-        if ch.is_none() {
-            return;
-        }
-        let ch = ch.unwrap();
+        let ch = line_chars[col];
 
         let matching = match ch {
             '(' => ')',
@@ -2091,8 +2136,9 @@ impl Editor {
                 }
             }
 
-            let current_char = self.buffer.get_line(current_line).chars().nth(current_col);
-            if let Some(c) = current_char {
+            let cur_chars: Vec<char> = self.buffer.get_line(current_line).chars().collect();
+            if current_col < cur_chars.len() {
+                let c = cur_chars[current_col];
                 if c == ch {
                     count += 1;
                 } else if c == matching {
@@ -2284,11 +2330,6 @@ impl Editor {
         let visible_rows = terminal_rows.saturating_sub(2);
         let line_count = self.buffer.line_count();
         self.state.cursor.line = (line_count.saturating_sub(visible_rows) + 1).max(1);
-    }
-
-    #[allow(dead_code)]
-    fn toggle_line_numbers(&mut self) {
-        self.state.show_line_numbers = !self.state.show_line_numbers;
     }
 
     pub fn scroll_up_one(&mut self) {
@@ -2490,13 +2531,13 @@ impl Editor {
 
     pub fn scroll_up(&mut self) {
         let rows = self.terminal.rows() as usize;
-        self.scroll_by(rows);
+        self.scroll_by(rows, false);
         self.needs_render = true;
     }
 
     pub fn scroll_down(&mut self) {
         let rows = self.terminal.rows() as usize;
-        self.scroll_by(rows.saturating_sub(1));
+        self.scroll_by(rows, true);
         self.needs_render = true;
     }
 
@@ -2731,6 +2772,7 @@ mod tests {
             pending_register: None,
             pending_mark: None,
             pending_macro_play: None,
+            pending_text_object: None,
             search_query: String::new(),
             search_direction: SearchDirection::Forward,
             search_results: Vec::new(),
@@ -2743,6 +2785,8 @@ mod tests {
             pending_save: false,
             kill_ring: KillRing::new(),
             highlights: Vec::new(),
+            insert_accum: String::new(),
+            insert_start_pos: None,
         }
     }
 

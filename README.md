@@ -28,12 +28,6 @@ ivim <file>
 
 - See [docs/keybindings.md](docs/keybindings.md) for the current keybinding specification.
 
-## Limitations (unimplemented features)
-
-- Vim keymap handler is currently a stub (key handling is not implemented in `src/keymap/vim.rs`).
-- Keybinding coverage is incomplete; only the documented Emacs bindings are implemented.
-- No split window/tab management feature is implemented yet.
-
 ## Install
 
 ```sh

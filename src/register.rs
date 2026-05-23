@@ -49,37 +49,6 @@ impl Register {
             }
         }
     }
-
-    #[allow(dead_code)]
-    fn get_system_clipboard(&self) -> Option<String> {
-        if let Ok(mut clipboard) = self.system_clipboard.lock() {
-            if let Some(ref mut cb) = *clipboard {
-                return cb.get_text().ok();
-            }
-        }
-        None
-    }
-
-    #[allow(dead_code)]
-    pub fn get_with_clipboard(&self, name: char) -> String {
-        if name == '+' {
-            self.get_system_clipboard()
-                .unwrap_or_else(|| self.get(name))
-        } else {
-            self.get(name)
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn append(&mut self, name: char, content: &str) {
-        let reg = name.to_ascii_lowercase();
-        let current = self.get(reg);
-        if current.is_empty() {
-            self.set(reg, content);
-        } else {
-            self.set(reg, &format!("{}\n{}", current, content));
-        }
-    }
 }
 
 impl Default for Register {

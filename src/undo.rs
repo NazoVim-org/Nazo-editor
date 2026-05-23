@@ -3,7 +3,6 @@ use crate::types::Position;
 use std::collections::VecDeque;
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub enum EditType {
     Insert {
         line: usize,
@@ -43,7 +42,6 @@ pub enum EditType {
 pub struct Edit {
     pub edit_type: EditType,
     pub cursor_before: Position,
-    #[allow(dead_code)]
     pub cursor_after: Position,
     pub modification_count: usize,
 }
@@ -63,7 +61,6 @@ impl UndoManager {
         }
     }
 
-    #[allow(dead_code)]
     pub fn push(&mut self, edit: Edit) {
         if self.undo_stack.len() >= self.max_size {
             self.undo_stack.pop_front();
@@ -80,7 +77,6 @@ impl UndoManager {
         Some(edit)
     }
 
-    #[allow(dead_code)]
     pub fn redo(&mut self, buffer: &mut TextBuffer) -> Option<Edit> {
         let edit = self.redo_stack.pop_back()?;
         self.undo_stack.push_back(edit.clone());
@@ -140,7 +136,6 @@ impl UndoManager {
         }
     }
 
-    #[allow(dead_code)]
     fn apply_redo(&self, buffer: &mut TextBuffer, edit: &Edit) {
         match &edit.edit_type {
             EditType::Insert { line, col, text } => {
@@ -181,17 +176,6 @@ impl UndoManager {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn can_undo(&self) -> bool {
-        !self.undo_stack.is_empty()
-    }
-
-    #[allow(dead_code)]
-    pub fn can_redo(&self) -> bool {
-        !self.redo_stack.is_empty()
-    }
-
-    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.undo_stack.clear();
         self.redo_stack.clear();
