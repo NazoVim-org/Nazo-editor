@@ -79,14 +79,22 @@ impl Renderer {
         let mut visual_lines: Vec<VisualLine> = Vec::with_capacity(visible_rows);
 
         // Ensure cursor is visible
-        self.ensure_cursor_visible(buffer, content_width, state.wrap, visible_rows, state.cursor.line);
+        self.ensure_cursor_visible(
+            buffer,
+            content_width,
+            state.wrap,
+            visible_rows,
+            state.cursor.line,
+        );
 
         // Build layout
         let mut buf_line = self.scroll_top;
         let mut screen_rows_used = 0;
         while screen_rows_used < visible_rows && buf_line <= buffer.line_count() {
             let raw_line = buffer.get_line(buf_line);
-            let line_highlights = highlights.get(buf_line.saturating_sub(1)).map(|v| v.as_slice());
+            let line_highlights = highlights
+                .get(buf_line.saturating_sub(1))
+                .map(|v| v.as_slice());
             let styled_chars = build_styled_chars(&raw_line, line_highlights);
             let segments = wrap_styled(&styled_chars, content_width, state.wrap);
 
@@ -136,7 +144,8 @@ impl Renderer {
             let content_end = line_number_prefix + vline.styled_chars.len();
             if content_end < cols {
                 for c in content_end..cols {
-                    self.screen.set_cell(screen_row, c, ' ', CellStyle::default());
+                    self.screen
+                        .set_cell(screen_row, c, ' ', CellStyle::default());
                 }
             }
         }
@@ -154,9 +163,11 @@ impl Renderer {
                     self.screen.set_cell(screen_row, col, ch, style);
                 }
                 // Show ~ in first content column
-                self.screen.set_cell(screen_row, line_number_prefix, '~', CellStyle::default());
+                self.screen
+                    .set_cell(screen_row, line_number_prefix, '~', CellStyle::default());
             } else {
-                self.screen.set_cell(screen_row, 0, '~', CellStyle::default());
+                self.screen
+                    .set_cell(screen_row, 0, '~', CellStyle::default());
             }
         }
 
@@ -222,7 +233,13 @@ impl Renderer {
             rows_consumed += wrapped_rows(&text, content_width, wrap_enabled);
             if rows_consumed >= visible_rows {
                 // Cursor is below — scroll to make cursor visible
-                let new_top = self.scroll_up_to_fit(buffer, content_width, wrap_enabled, visible_rows, cursor_line);
+                let new_top = self.scroll_up_to_fit(
+                    buffer,
+                    content_width,
+                    wrap_enabled,
+                    visible_rows,
+                    cursor_line,
+                );
                 self.scroll_top = new_top;
                 return;
             }
@@ -274,7 +291,9 @@ impl Renderer {
                 let seg_start = vl.segment_start_col;
                 let seg_len = vl.styled_chars.len();
                 let col_in_seg = if seg_len > 0 {
-                    cursor_col.saturating_sub(seg_start).min(seg_len.saturating_sub(1))
+                    cursor_col
+                        .saturating_sub(seg_start)
+                        .min(seg_len.saturating_sub(1))
                 } else {
                     0
                 };
@@ -285,7 +304,10 @@ impl Renderer {
         // Cursor line not in viewport — estimate using first line
         if let Some(first) = visual_lines.first() {
             if first.buffer_line == cursor_line {
-                return (0, line_number_prefix + cursor_col.min(_content_width.saturating_sub(1)));
+                return (
+                    0,
+                    line_number_prefix + cursor_col.min(_content_width.saturating_sub(1)),
+                );
             }
         }
 
@@ -295,13 +317,7 @@ impl Renderer {
     // ── Status line ──
 
     /// Render the status/command/confirmation line.
-    fn render_status(
-        &mut self,
-        row: usize,
-        cols: usize,
-        state: &EditorState,
-        style: CellStyle,
-    ) {
+    fn render_status(&mut self, row: usize, cols: usize, state: &EditorState, style: CellStyle) {
         let text = if state.has_confirmation() {
             state
                 .confirmation_prompt

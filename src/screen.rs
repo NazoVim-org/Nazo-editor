@@ -328,8 +328,5 @@ pub fn build_styled_chars(
         char_styles.resize(len, CellStyle::default());
     }
 
-    chars
-        .into_iter()
-        .zip(char_styles)
-        .collect()
+    chars.into_iter().zip(char_styles).collect()
 }

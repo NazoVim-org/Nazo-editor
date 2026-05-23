@@ -278,10 +278,12 @@ impl Editor {
     pub async fn run(&mut self) -> io::Result<()> {
         self.running = true;
 
-        if let Err(e) = self
-            .renderer
-            .render(&mut self.terminal, &self.buffer, &self.state, &self.highlights)
-        {
+        if let Err(e) = self.renderer.render(
+            &mut self.terminal,
+            &self.buffer,
+            &self.state,
+            &self.highlights,
+        ) {
             eprintln!("[render] error: {}", e);
         }
         self.needs_render = false;
@@ -322,10 +324,12 @@ impl Editor {
             }
 
             if self.needs_render {
-                if let Err(e) = self
-                    .renderer
-                    .render(&mut self.terminal, &self.buffer, &self.state, &self.highlights)
-                {
+                if let Err(e) = self.renderer.render(
+                    &mut self.terminal,
+                    &self.buffer,
+                    &self.state,
+                    &self.highlights,
+                ) {
                     eprintln!("[render] error: {}", e);
                 }
                 self.needs_render = false;
