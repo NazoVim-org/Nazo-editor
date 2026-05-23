@@ -5,6 +5,7 @@ pub mod keymap;
 pub mod plugin;
 pub mod register;
 pub mod renderer;
+pub mod screen;
 pub mod terminal;
 pub mod types;
 pub mod undo;

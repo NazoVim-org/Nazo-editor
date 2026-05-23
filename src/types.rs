@@ -144,6 +144,7 @@ pub struct EditorState {
     pub macros: Macros,
     pub confirmation_prompt: Option<ConfirmationPrompt>,
     pub show_line_numbers: bool,
+    pub wrap: bool,
     pub mark: Option<Position>,
     pub region_active: bool,
 }
@@ -162,6 +163,7 @@ impl Default for EditorState {
             macros: Macros::new(),
             confirmation_prompt: None,
             show_line_numbers: true,
+            wrap: true,
             mark: None,
             region_active: false,
         }
