@@ -264,7 +264,6 @@ impl Editor {
             region_active: false,
         };
 
-
         Ok(Editor::new_shared(
             terminal,
             buffer,
