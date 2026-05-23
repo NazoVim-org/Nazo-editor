@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Project
-Rust TUI Vim-like editor (nestvim v0.1.0). Single Cargo package, edition 2021.
+Rust TUI Vim-like editor (ijevim v0.1.0). Single Cargo package, edition 2021.
 
 ## Commands
 - Build: `cargo build` (debug) / `cargo build --release`

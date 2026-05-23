@@ -1,5 +1,5 @@
 {
-  description = "nestvim - A minimal Vim-like TUI editor written in Rust";
+  description = "ijevim - A minimal Vim-like TUI editor written in Rust";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -35,7 +35,7 @@
 
             shellHook = ''
               echo "═══════════════════════════════════════════════════"
-              echo "  nestvim development environment (Rust ${rustVersion})"
+              echo "  ijevim development environment (Rust ${rustVersion})"
               echo "═══════════════════════════════════════════════════"
               echo "  Build:   cargo build --release"
               echo "  Run:     cargo run -- [file]"

@@ -1,4 +1,4 @@
-# nestvim
+# ijevim
 
 A minimal Vim-like TUI editor written in Rust.
 
@@ -15,13 +15,13 @@ A minimal Vim-like TUI editor written in Rust.
 
 ```sh
 # Start with Vim keymap
-nestvim vim
+ivim vim
 
 # Start with Emacs keymap
-nestvim emacs
+ivim emacs
 
 # Open a file (defaults to Vim keymap)
-nestvim <file>
+ivim <file>
 ```
 
 ## Keybind specification
@@ -37,7 +37,7 @@ nestvim <file>
 ## Install
 
 ```sh
-cargo install nestvim
+cargo install ijevim
 ```
 
 ## キーマップ互換レベル

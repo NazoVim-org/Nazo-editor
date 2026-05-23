@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyModifiers};
-use nestvim::editor::Editor;
-use nestvim::types::{Keymap, Mode};
+use ijevim::editor::Editor;
+use ijevim::types::{Keymap, Mode};
 
 #[tokio::test]
 async fn vim_input_flow_and_boundaries() {

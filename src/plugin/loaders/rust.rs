@@ -51,7 +51,7 @@ impl super::Loader for RustLoader {
 
         unsafe {
             let version: Symbol<GetApiVersionFn> =
-                library.get(b"nestvim_plugin_api_version").map_err(|e| {
+                library.get(b"ijevim_plugin_api_version").map_err(|e| {
                     super::LoaderError::Io(format!("Failed to get version symbol: {}", e))
                 })?;
 
@@ -64,7 +64,7 @@ impl super::Loader for RustLoader {
             }
 
             let create: Symbol<CreatePluginFn> =
-                library.get(b"nestvim_plugin_create").map_err(|e| {
+                library.get(b"ijevim_plugin_create").map_err(|e| {
                     super::LoaderError::Io(format!("Failed to get create symbol: {}", e))
                 })?;
 

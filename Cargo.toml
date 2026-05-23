@@ -1,10 +1,14 @@
 [package]
-name = "nestvim"
+name = "ijevim"
 version = "0.1.0"
 edition = "2021"
 description = "A minimal Vim-like TUI editor written in Rust"
 authors = ["NazoVim-org"]
 license = "MIT"
+
+[[bin]]
+name = "ivim"
+path = "src/main.rs"
 
 [dependencies]
 crossterm = { version = "0.29", features = ["event-stream"] }

@@ -51,13 +51,13 @@ impl super::Loader for LuaLoader {
         let api_outer = api.clone();
         #[allow(unused_must_use)]
         lua.globals().set(
-            "nestvim",
+            "ijevim",
             lua.create_table()
                 .map_err(|e| super::LoaderError::Parse(format!("Lua error: {}", e)))?,
         );
 
         lua.globals()
-            .get::<_, mlua::Table>("nestvim")
+            .get::<_, mlua::Table>("ijevim")
             .map_err(|e| super::LoaderError::Parse(format!("Lua error: {}", e)))?
             .set(
                 "log",
