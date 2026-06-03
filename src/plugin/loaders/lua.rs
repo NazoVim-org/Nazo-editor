@@ -132,10 +132,8 @@ impl Plugin for LuaPlugin {
         };
 
         // Iterate over all handlers in the list
-        for pair in list.pairs::<usize, Function>() {
-            if let Ok((_idx, handler)) = pair {
-                let _ = handler.call::<_, ()>(());
-            }
+        for (_idx, handler) in list.pairs::<usize, Function>().flatten() {
+            let _ = handler.call::<_, ()>(());
         }
     }
 

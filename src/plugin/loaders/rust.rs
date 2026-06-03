@@ -107,7 +107,7 @@ impl Plugin for RustPlugin {
             for handler in handlers {
                 let event_cb: EventFn = Box::new(move |_event| {
                     // For now, pass generic event data; extend later
-                    let _ = unsafe { handler(0, 0) };
+                    unsafe { handler(0, 0) };
                 });
                 let api_events = api.event_handlers().clone();
                 api_events

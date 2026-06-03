@@ -5,12 +5,13 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
+type JsCtx = RefCell<Option<(Rc<PluginApi>, Rc<RefCell<JsPluginState>>)>>;
+
 thread_local! {
     /// Thread-local API + state reference for JS callbacks.
     /// Closures capture nothing (access via thread-local),
     /// so they are `RefUnwindSafe` and `'static`.
-    static JS_CTX: RefCell<Option<(Rc<PluginApi>, Rc<RefCell<JsPluginState>>)>> =
-        const { RefCell::new(None) };
+    static JS_CTX: JsCtx = const { RefCell::new(None) };
 }
 
 struct JsPluginState {

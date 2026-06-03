@@ -108,7 +108,7 @@ fn default_env_with_bindings(
         let api_clone = api.clone();
         let add_command = Value::NativeClosure(Rc::new(RefCell::new(
             move |_env: Rc<RefCell<Env>>, args: Vec<Value>| -> Result<Value, RuntimeError> {
-                if args.len() < 1 {
+                if args.is_empty() {
                     return Err(RuntimeError {
                         msg: "add-command requires at least 1 argument: (name)".to_string(),
                     });
@@ -137,7 +137,7 @@ fn default_env_with_bindings(
         let api_clone = api.clone();
         let on = Value::NativeClosure(Rc::new(RefCell::new(
             move |_env: Rc<RefCell<Env>>, args: Vec<Value>| -> Result<Value, RuntimeError> {
-                if args.len() < 1 {
+                if args.is_empty() {
                     return Err(RuntimeError {
                         msg: "on requires at least 1 argument: (event-name)".to_string(),
                     });
