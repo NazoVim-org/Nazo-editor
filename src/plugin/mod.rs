@@ -4,6 +4,7 @@ pub mod loaders;
 pub use api::{Plugin, PluginApi};
 
 use crate::types::{IjevimError, PluginEvent};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -36,9 +37,9 @@ impl PluginManager {
             .join("ijevim")
     }
 
-    /// Plugin directory: `$NESTVIM_PLUGIN_DIR` or `$CONFIG_DIR/plugins/`.
+    /// Plugin directory: `$IJEVIM_PLUGIN_DIR` or `$CONFIG_DIR/plugins/`.
     fn plugins_dir() -> std::path::PathBuf {
-        if let Ok(dir) = std::env::var("NESTVIM_PLUGIN_DIR") {
+        if let Ok(dir) = std::env::var("IJEVIM_PLUGIN_DIR") {
             std::path::PathBuf::from(dir)
         } else {
             Self::config_dir().join("plugins")
@@ -93,45 +94,80 @@ impl PluginManager {
         }
     }
 
-    /// Call `setup(&api)` on every plugin that hasn't been set up yet.
-    /// (Plugins that were set up by their loader keep a flag, but currently
-    /// every loader defers to this method.)
+    /// Call `setup(&api)` on every plugin.
     fn setup_all(&mut self) {
         for plugin in &mut self.plugins {
-            plugin.setup(&self.api);
+            let name = plugin.name().to_string();
+            let api = self.api.clone();
+            // Use a flag to track panic; can't move `plugin` into closure directly.
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                plugin.setup(&api);
+            }));
+            if result.is_err() {
+                eprintln!("[plugin] Panic in setup(): {}", name);
+            }
         }
     }
 
     pub fn emit(&mut self, event: PluginEvent) {
         for plugin in &mut self.plugins {
-            plugin.handle_event(&event);
+            let name = plugin.name().to_string();
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                plugin.handle_event(&event);
+            }));
+            if result.is_err() {
+                eprintln!("[plugin] Panic in handle_event(): {}", name);
+            }
         }
 
         let handlers = self.api.event_handlers();
         let event_name = match &event {
-            PluginEvent::ModeChange { .. } => "ModeChange",
-            PluginEvent::BufferChange => "BufferChange",
-            PluginEvent::Key { .. } => "Key",
-            PluginEvent::BufferSave { .. } => "BufferSave",
-            PluginEvent::Ready => "Ready",
+            PluginEvent::ModeChange { .. } => "mode_change",
+            PluginEvent::BufferChange => "buffer_change",
+            PluginEvent::Key { .. } => "key",
+            PluginEvent::BufferSave { .. } => "buffer_save",
+            PluginEvent::Ready => "ready",
         };
         if let Some(event_handlers) = handlers.borrow().get(event_name) {
             for handler in event_handlers {
-                handler(&event);
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    handler(&event);
+                }));
+                if result.is_err() {
+                    eprintln!("[plugin] Panic in global event handler ({})", event_name);
+                }
             }
         }
     }
 
-    pub fn execute_command(&mut self, cmd: &str) -> bool {
+    pub fn execute_command(&mut self, cmd: &str, args: Vec<String>) -> bool {
+        let cmd_owned = cmd.to_string();
         for plugin in &mut self.plugins {
-            if plugin.execute_command(cmd, vec![]) {
-                return true;
+            let name = plugin.name().to_string();
+            let cmd = cmd_owned.clone();
+            let args = args.clone();
+            let result = catch_unwind(AssertUnwindSafe(|| -> bool {
+                plugin.execute_command(&cmd, args)
+            }));
+            match result {
+                Ok(true) => return true,
+                Ok(false) => continue,
+                Err(_) => {
+                    eprintln!("[plugin] Panic in execute_command(): {}", name);
+                    continue;
+                }
             }
         }
 
         let commands = self.api.commands();
-        if let Some(f) = commands.borrow().get(cmd) {
-            f(vec![]);
+        if let Some(f) = commands.borrow().get(&cmd_owned) {
+            let args = args.clone();
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                f(args);
+            }));
+            if result.is_err() {
+                eprintln!("[plugin] Panic in global command handler: {}", cmd_owned);
+            }
             true
         } else {
             false

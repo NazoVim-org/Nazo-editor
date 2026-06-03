@@ -25,6 +25,8 @@ impl LispPluginState {
 
 pub struct LispPlugin {
     name: String,
+    // State kept for loader registration; PluginApi handles dispatch
+    #[allow(dead_code)]
     state: Rc<RefCell<LispPluginState>>,
 }
 
@@ -37,27 +39,16 @@ impl Plugin for LispPlugin {
         // Setup is handled during loading since native closures capture the API
     }
 
-    fn handle_event(&mut self, event: &PluginEvent) {
-        let event_name = event_name_str(event);
-        let state = self.state.borrow();
-        if state.events.iter().any(|e| e == event_name) {
-            let _ = event_name;
-        }
+    fn handle_event(&mut self, _event: &PluginEvent) {
+        // Event dispatch happens via PluginApi's global event_handlers
+        // (registered at load time by the `on` Lisp binding)
     }
 
-    fn execute_command(&mut self, cmd: &str, _args: Vec<String>) -> bool {
-        let state = self.state.borrow();
-        state.commands.iter().any(|c| c == cmd)
-    }
-}
-
-fn event_name_str(event: &PluginEvent) -> &'static str {
-    match event {
-        PluginEvent::Ready => "Ready",
-        PluginEvent::Key { .. } => "Key",
-        PluginEvent::BufferChange => "BufferChange",
-        PluginEvent::BufferSave { .. } => "BufferSave",
-        PluginEvent::ModeChange { .. } => "ModeChange",
+    fn execute_command(&mut self, _cmd: &str, _args: Vec<String>) -> bool {
+        // Command dispatch happens via PluginApi's global commands
+        // (registered at load time by the `add-command` Lisp binding).
+        // Return false so PluginManager falls through to PluginApi.
+        false
     }
 }
 
@@ -217,10 +208,16 @@ mod tests {
 
         let loader = LispLoader;
         let api = Rc::new(PluginApi::new());
-        let mut plugin = loader.load(&path, api.clone()).unwrap();
+        let mut _plugin = loader.load(&path, api.clone()).unwrap();
 
-        assert!(plugin.execute_command("hello", vec![]));
-        assert!(!plugin.execute_command("unknown", vec![]));
+        // LispPlugin::execute_command returns false (delegates to PluginApi).
+        // The command should be registered in PluginApi instead.
+        assert!(!_plugin.execute_command("hello", vec![]));
+        assert!(!_plugin.execute_command("unknown", vec![]));
+
+        // Verify command is registered in global PluginApi
+        let cmds = api.commands();
+        assert!(cmds.borrow().contains_key("hello"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -119,13 +119,23 @@ impl Plugin for RustPlugin {
         }
     }
 
-    fn handle_event(&mut self, _event: &PluginEvent) {
-        // Events are dispatched via PluginApi's event_handlers (registered in setup).
-        // The vtable's handle_event is for the plugin's own event handling.
-        // unsafe { (self.vtable.handle_event)(event_type, 0); }
+    fn handle_event(&mut self, event: &PluginEvent) {
+        // Map PluginEvent to a numeric event type for the native plugin.
+        let event_type = match event {
+            PluginEvent::ModeChange { .. } => 1,
+            PluginEvent::BufferChange => 2,
+            PluginEvent::Key { .. } => 3,
+            PluginEvent::BufferSave { .. } => 4,
+            PluginEvent::Ready => 5,
+        };
+        unsafe {
+            (self.vtable.handle_event)(event_type, 0);
+        }
     }
 
-    fn execute_command(&mut self, cmd: &str, _args: Vec<String>) -> bool {
+    fn execute_command(&mut self, cmd: &str, args: Vec<String>) -> bool {
+        // TODO: pass `args` through the FFI vtable once the interface supports it.
+        let _ = args;
         let cmd_bytes = cmd.as_bytes();
         unsafe { (self.vtable.execute_command)(cmd_bytes.as_ptr(), cmd_bytes.len()) != 0 }
     }

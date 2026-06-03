@@ -5,32 +5,26 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-type JsCtx = RefCell<Option<(Rc<PluginApi>, Rc<RefCell<JsPluginState>>)>>;
+type JsCtx = RefCell<Option<Rc<PluginApi>>>;
 
 thread_local! {
-    /// Thread-local API + state reference for JS callbacks.
+    /// Thread-local API reference for JS callbacks.
     /// Closures capture nothing (access via thread-local),
     /// so they are `RefUnwindSafe` and `'static`.
-    static JS_CTX: JsCtx = const { RefCell::new(None) };
-}
-
-struct JsPluginState {
-    commands: Vec<String>,
-    events: Vec<String>,
-}
-
-impl JsPluginState {
-    fn new() -> Self {
-        Self {
-            commands: Vec::new(),
-            events: Vec::new(),
-        }
-    }
+    static JS_API: JsCtx = const { RefCell::new(None) };
 }
 
 pub struct JavaScriptPlugin {
     name: String,
-    state: Rc<RefCell<JsPluginState>>,
+    ctx: Context,
+}
+
+/// Escape a string for safe embedding in a JS string literal (single-quoted).
+fn js_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 impl Plugin for JavaScriptPlugin {
@@ -38,29 +32,79 @@ impl Plugin for JavaScriptPlugin {
         &self.name
     }
 
-    fn setup(&mut self, _api: &PluginApi) {}
+    fn setup(&mut self, _api: &PluginApi) {
+        // Setup is handled during load (the JS code has already run)
+    }
 
     fn handle_event(&mut self, event: &PluginEvent) {
         let event_name = event_name_str(event);
-        let state = self.state.borrow();
-        if state.events.iter().any(|e| e == event_name) {
-            let _ = event_name;
-        }
+        // Build event data object
+        let data_expr = event_data_expr(event);
+        let code = format!(
+            r#"var _list = __events['{}'];
+if (_list) _list.forEach(function(f) {{ f({}); }});
+undefined"#,
+            js_escape(event_name),
+            data_expr,
+        );
+        let _ = self.ctx.eval(&code, false);
     }
 
-    fn execute_command(&mut self, cmd: &str, _args: Vec<String>) -> bool {
-        let state = self.state.borrow();
-        state.commands.iter().any(|c| c == cmd)
+    fn execute_command(&mut self, cmd: &str, args: Vec<String>) -> bool {
+        let escaped = js_escape(cmd);
+        // Build args array literal
+        let args_js: Vec<String> = args.iter().map(|a| format!("'{}'", js_escape(a))).collect();
+        let args_str = if args_js.is_empty() {
+            String::new()
+        } else {
+            args_js.join(", ")
+        };
+        let code = format!(
+            r#"(typeof __commands['{}'] === 'function') ? (__commands['{}']({}), true) : false"#,
+            escaped, escaped, args_str,
+        );
+        match self.ctx.eval_as::<bool>(&code) {
+            Ok(handled) => handled,
+            Err(_) => false,
+        }
     }
 }
 
 fn event_name_str(event: &PluginEvent) -> &'static str {
     match event {
-        PluginEvent::Ready => "Ready",
-        PluginEvent::Key { .. } => "Key",
-        PluginEvent::BufferChange => "BufferChange",
-        PluginEvent::BufferSave { .. } => "BufferSave",
-        PluginEvent::ModeChange { .. } => "ModeChange",
+        PluginEvent::Ready => "ready",
+        PluginEvent::Key { .. } => "key",
+        PluginEvent::BufferChange => "buffer_change",
+        PluginEvent::BufferSave { .. } => "buffer_save",
+        PluginEvent::ModeChange { .. } => "mode_change",
+    }
+}
+
+/// Build a JS object expression for event data.
+fn event_data_expr(event: &PluginEvent) -> String {
+    match event {
+        PluginEvent::ModeChange { from, to } => {
+            format!(
+                "{{ from: '{}', to: '{}' }}",
+                js_escape(&format!("{:?}", from)),
+                js_escape(&format!("{:?}", to)),
+            )
+        }
+        PluginEvent::Key { mode, key } => {
+            format!(
+                "{{ mode: '{}', key: '{}' }}",
+                js_escape(&format!("{:?}", mode)),
+                js_escape(key),
+            )
+        }
+        PluginEvent::BufferSave { file_path } => {
+            if let Some(p) = file_path {
+                format!("{{ file: '{}' }}", js_escape(&p.to_string_lossy()))
+            } else {
+                "{}".to_string()
+            }
+        }
+        PluginEvent::BufferChange | PluginEvent::Ready => "{}".to_string(),
     }
 }
 
@@ -86,39 +130,16 @@ impl super::Loader for JavaScriptLoader {
             super::LoaderError::Parse(format!("Failed to create JS context: {}", e))
         })?;
 
-        // Create shared state
-        let state = Rc::new(RefCell::new(JsPluginState::new()));
-
-        // Store API + state in thread-local for callback access.
+        // Store API in thread-local for callback access.
         // Closures capture nothing, so they are `RefUnwindSafe` and `'static`.
-        JS_CTX.with(|slot| {
-            *slot.borrow_mut() = Some((api.clone(), state.clone()));
+        JS_API.with(|slot| {
+            *slot.borrow_mut() = Some(api.clone());
         });
 
-        // Register global callbacks.
-        ctx.add_callback("__ijevim_addCommand", |cmd: String| -> String {
-            JS_CTX.with(|slot| {
-                if let Some((ref _api, ref state)) = *slot.borrow() {
-                    state.borrow_mut().commands.push(cmd.clone());
-                }
-            });
-            format!("Command '{}' registered", cmd)
-        })
-        .map_err(|e| super::LoaderError::Parse(format!("Failed to register addCommand: {}", e)))?;
-
-        ctx.add_callback("__ijevim_on", |event: String| -> String {
-            JS_CTX.with(|slot| {
-                if let Some((ref _api, ref state)) = *slot.borrow() {
-                    state.borrow_mut().events.push(event.clone());
-                }
-            });
-            format!("Handler for '{}' registered", event)
-        })
-        .map_err(|e| super::LoaderError::Parse(format!("Failed to register on: {}", e)))?;
-
+        // Register a Rust callback for logging (captures nothing via thread-local).
         ctx.add_callback("__ijevim_log", |msg: String| -> String {
-            JS_CTX.with(|slot| {
-                if let Some((ref api, ref _state)) = *slot.borrow() {
+            JS_API.with(|slot| {
+                if let Some(ref api) = *slot.borrow() {
                     api.log(&msg);
                 }
             });
@@ -126,29 +147,40 @@ impl super::Loader for JavaScriptLoader {
         })
         .map_err(|e| super::LoaderError::Parse(format!("Failed to register log: {}", e)))?;
 
-        // JS preamble: create the ijevim namespace wrapping the flat callbacks
+        // Set up the JS-side infrastructure: __commands, __events, and the ijevim namespace.
         let preamble = r#"
-var ijevim = (function() {
-    return {
-        addCommand: function(cmd) { return __ijevim_addCommand(cmd); },
-        on: function(event) { return __ijevim_on(event); },
-        log: function(msg) { __ijevim_log(msg); }
-    };
-})();
+var __commands = {};
+var __events = {};
+
+var ijevim = {
+    addCommand: function(name, func) {
+        if (typeof func !== 'function') {
+            __ijevim_log("addCommand: second argument must be a function");
+            return;
+        }
+        __commands[name] = func;
+    },
+    on: function(event, handler) {
+        if (typeof handler !== 'function') {
+            __ijevim_log("on: second argument must be a function");
+            return;
+        }
+        if (!__events[event]) __events[event] = [];
+        __events[event].push(handler);
+    },
+    log: function(msg) {
+        __ijevim_log(String(msg));
+    }
+};
 "#;
         ctx.eval(preamble, false)
-            .map_err(|e| super::LoaderError::Parse(format!("JS preamble eval error: {}", e)))?;
+            .map_err(|e| super::LoaderError::Parse(format!("JS preamble error: {}", e)))?;
 
         // Evaluate the plugin code
         ctx.eval(&code, false)
             .map_err(|e| super::LoaderError::Parse(format!("JS eval error: {}", e)))?;
 
-        // Clear thread-local
-        JS_CTX.with(|slot| {
-            *slot.borrow_mut() = None;
-        });
-
-        Ok(Box::new(JavaScriptPlugin { name, state }))
+        Ok(Box::new(JavaScriptPlugin { name, ctx }))
     }
 }
 
@@ -178,7 +210,11 @@ mod tests {
         let dir = std::env::temp_dir().join("ijevim-test-js-cmd");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("cmdtest.js");
-        std::fs::write(&path, "ijevim.addCommand(\"hello-js\");").unwrap();
+        std::fs::write(
+            &path,
+            "ijevim.addCommand(\"hello-js\", function() { return 42; });",
+        )
+        .unwrap();
 
         let loader = JavaScriptLoader;
         let api = Rc::new(PluginApi::new());
@@ -195,10 +231,11 @@ mod tests {
         let dir = std::env::temp_dir().join("ijevim-test-js-evt");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("evttest.js");
-        std::fs::write(&path, "ijevim.on(\"Ready\");").unwrap();
+        std::fs::write(&path, "ijevim.on(\"ready\", function() { /* noop */ });").unwrap();
 
         let loader = JavaScriptLoader;
         let api = Rc::new(PluginApi::new());
-        let _plugin = loader.load(&path, api).unwrap();
+        let mut plugin = loader.load(&path, api).unwrap();
+        plugin.handle_event(&PluginEvent::Ready);
     }
 }
