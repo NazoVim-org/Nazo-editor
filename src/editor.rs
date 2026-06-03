@@ -878,7 +878,8 @@ impl Editor {
                         self.pending_operator = None;
                         let reg = r;
                         let count = self.take_count();
-                        self.execute_operator_with_register(op, reg, key, count).await;
+                        self.execute_operator_with_register(op, reg, key, count)
+                            .await;
                     }
                 }
             }
@@ -1363,7 +1364,13 @@ impl Editor {
         }
     }
 
-    async fn execute_operator_with_register(&mut self, op: char, register: char, _key: KeyCode, count: usize) {
+    async fn execute_operator_with_register(
+        &mut self,
+        op: char,
+        register: char,
+        _key: KeyCode,
+        count: usize,
+    ) {
         match op {
             'y' => {
                 for _ in 0..count {

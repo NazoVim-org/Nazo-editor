@@ -63,10 +63,7 @@ undefined"#,
             r#"(typeof __commands['{}'] === 'function') ? (__commands['{}']({}), true) : false"#,
             escaped, escaped, args_str,
         );
-        match self.ctx.eval_as::<bool>(&code) {
-            Ok(handled) => handled,
-            Err(_) => false,
-        }
+        self.ctx.eval_as::<bool>(&code).unwrap_or_default()
     }
 }
 
