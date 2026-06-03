@@ -43,6 +43,7 @@ pub enum Mode {
 pub enum VisualType {
     Character,
     Line,
+    Block,
 }
 
 #[derive(Clone, Debug)]

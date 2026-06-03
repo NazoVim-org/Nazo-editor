@@ -20,21 +20,21 @@ use std::time::{Duration, Instant};
 use syntect::highlighting::Style;
 
 pub struct Editor {
-    pub(crate) terminal: Terminal,
-    pub(crate) buffer: TextBuffer,
+    pub terminal: Terminal,
+    pub buffer: TextBuffer,
     pub(crate) highlighter: Highlighter,
     pub(crate) renderer: Renderer,
     pub(crate) plugin_manager: PluginManager,
-    pub(crate) register: Register,
+    pub register: Register,
     pub(crate) undo_manager: UndoManager,
-    pub(crate) state: EditorState,
-    pub(crate) running: bool,
+    pub state: EditorState,
+    pub running: bool,
     pub(crate) last_highlight_mod_count: usize,
     pub(crate) last_keypress_time: Instant,
     pub(crate) needs_render: bool,
-    pub(crate) pending_operator: Option<char>,
+    pub pending_operator: Option<char>,
     /// Numeric count prefix (e.g., `3` in `3j`). Accumulated digit by digit.
-    pub(crate) pending_count: Option<usize>,
+    pub pending_count: Option<usize>,
     pub(crate) pending_register: Option<char>,
     pub(crate) pending_mark: Option<char>,
     pub(crate) pending_macro_play: Option<char>,
@@ -49,7 +49,11 @@ pub struct Editor {
     pub(crate) last_fchar_till: bool,
     pub(crate) keymap_handler: Rc<RefCell<dyn KeymapHandler>>,
     pub(crate) highlights: Vec<Vec<(Style, String)>>,
-    pub(crate) kill_ring: KillRing,
+    pub kill_ring: KillRing,
+    /// Cursor position before the last yank (for yank-pop cycle).
+    pub yank_start: Option<crate::types::Position>,
+    /// Length of text inserted by the last yank (for yank-pop undo).
+    pub yank_length: usize,
     /// Accumulated characters typed during the current insert-mode session.
     /// Used to push a single undo-group when leaving insert mode.
     insert_accum: String,
@@ -62,7 +66,7 @@ pub struct Editor {
 /// - yank(): get the newest entry
 /// - yank_pop(): cycle to the previous entry (for future M-y)
 #[derive(Clone)]
-pub(crate) struct KillRing {
+pub struct KillRing {
     entries: Vec<String>,
     index: usize,
     max_entries: usize,
@@ -90,12 +94,16 @@ impl KillRing {
         self.index = 0;
     }
 
-    #[allow(dead_code)]
     pub fn yank(&self) -> Option<&str> {
         self.entries.first().map(|s| s.as_str())
     }
 
-    #[allow(dead_code)]
+    /// Return the entry at the current index (for yank-pop cycling).
+    pub fn current_yank(&self) -> Option<&str> {
+        self.entries.get(self.index).map(|s| s.as_str())
+    }
+
+    /// Advance the index and return the next entry (yank-pop forward).
     pub fn yank_pop(&mut self) -> Option<&str> {
         if self.entries.is_empty() {
             return None;
@@ -104,12 +112,10 @@ impl KillRing {
         self.entries.get(self.index).map(|s| s.as_str())
     }
 
-    #[allow(dead_code)]
     pub fn reset_index(&mut self) {
         self.index = 0;
     }
 
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -191,6 +197,8 @@ impl Editor {
             insert_accum: String::new(),
             insert_start_pos: None,
             kill_ring: KillRing::new(),
+            yank_start: None,
+            yank_length: 0,
         }
     }
 
@@ -515,9 +523,16 @@ impl Editor {
             KeyCode::Char('$') => {
                 let count = self.take_count();
                 let target = (self.state.cursor.line + count - 1).min(self.buffer.line_count());
-                let line_len = self.buffer.get_line(target).len();
+                let line = self.buffer.get_line(target);
+                let line_len = line.len();
+                // Exclude trailing newline from column calculation
+                let end_col = if line_len > 0 && line.ends_with('\n') {
+                    line_len.saturating_sub(2)
+                } else {
+                    line_len.saturating_sub(1)
+                };
                 self.state.cursor.line = target;
-                self.state.cursor.col = line_len.saturating_sub(1);
+                self.state.cursor.col = end_col;
                 self.needs_render = true;
             }
             KeyCode::Char('D') => {
@@ -922,7 +937,9 @@ impl Editor {
             },
             'd' => match key {
                 KeyCode::Char('d') => {
-                    self.delete_line(register);
+                    for _ in 0..count.max(1) {
+                        self.delete_line(register);
+                    }
                 }
                 KeyCode::Char('w') => {
                     self.delete_word(register);
@@ -1590,9 +1607,42 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('$') => {
-                let line_len = self.buffer.get_line(self.state.cursor.line).len();
-                self.state.cursor.col = line_len.saturating_sub(1);
+                let line = self.buffer.get_line(self.state.cursor.line);
+                let line_len = line.len();
+                self.state.cursor.col = if line_len > 0 && line.ends_with('\n') {
+                    line_len.saturating_sub(2)
+                } else {
+                    line_len.saturating_sub(1)
+                };
                 self.needs_render = true;
+            }
+            KeyCode::Char('I') => {
+                if self.state.visual_type == Some(VisualType::Block) {
+                    // I in block mode: insert at block start (left column)
+                    let s_col = self.state.visual_start.map(|s| s.col).unwrap_or(0)
+                        .min(self.state.cursor.col);
+                    self.state.cursor.col = s_col;
+                    self.state.visual_start = None;
+                    self.state.visual_type = None;
+                    let prev_mode = self.state.mode;
+                    self.state.mode = Mode::Insert;
+                    self.plugin_manager.emit(PluginEvent::ModeChange { from: prev_mode, to: Mode::Insert });
+                    self.needs_render = true;
+                }
+            }
+            KeyCode::Char('A') => {
+                if self.state.visual_type == Some(VisualType::Block) {
+                    // A in block mode: append after block end (right column)
+                    let e_col = self.state.visual_start.map(|s| s.col).unwrap_or(0)
+                        .max(self.state.cursor.col);
+                    self.state.cursor.col = e_col;
+                    self.state.visual_start = None;
+                    self.state.visual_type = None;
+                    let prev_mode = self.state.mode;
+                    self.state.mode = Mode::Insert;
+                    self.plugin_manager.emit(PluginEvent::ModeChange { from: prev_mode, to: Mode::Insert });
+                    self.needs_render = true;
+                }
             }
             _ => {}
         }
@@ -1611,6 +1661,12 @@ impl Editor {
                         self.normalize_line_selection(start.line, self.state.cursor.line);
                     self.buffer.get_line_range(s_line, e_line)
                 }
+                VisualType::Block => {
+                    self.buffer.get_block_range(
+                        start.line, start.col,
+                        self.state.cursor.line, self.state.cursor.col,
+                    )
+                }
             };
             self.register.set('"', &content);
         }
@@ -1618,26 +1674,41 @@ impl Editor {
 
     fn visual_delete(&mut self) {
         if let (Some(start), Some(vtype)) = (&self.state.visual_start, self.state.visual_type) {
-            let content = match vtype {
+            let (cursor_line, cursor_col) = match vtype {
                 VisualType::Character => {
                     let (s_line, s_col, e_line, e_col) =
                         self.normalize_selection(start, &self.state.cursor);
-                    self.buffer.delete_range(s_line, s_col, e_line, e_col)
+                    let content = self.buffer.delete_range(s_line, s_col, e_line, e_col);
+                    self.register.set('"', &content);
+                    (s_line, s_col)
                 }
                 VisualType::Line => {
                     let (s_line, e_line) =
                         self.normalize_line_selection(start.line, self.state.cursor.line);
+                    let count = e_line.saturating_sub(s_line) + 1;
                     let mut content = String::new();
-                    for line in s_line..=e_line {
-                        content.push_str(&self.buffer.delete_line(line));
-                        if line < e_line {
+                    for i in 0..count {
+                        let deleted = self.buffer.delete_line(s_line);
+                        content.push_str(&deleted);
+                        if i < count - 1 {
                             content.push('\n');
                         }
                     }
-                    content
+                    self.register.set('"', &content);
+                    (s_line.min(self.buffer.line_count()), 0)
+                }
+                VisualType::Block => {
+                    let s_line = start.line.min(self.state.cursor.line);
+                    let e_line = start.line.max(self.state.cursor.line);
+                    let s_col = start.col.min(self.state.cursor.col);
+                    let e_col = start.col.max(self.state.cursor.col);
+                    let content = self.buffer.delete_block_range(s_line, s_col, e_line, e_col);
+                    self.register.set('"', &content);
+                    (s_line, s_col)
                 }
             };
-            self.register.set('"', &content);
+            self.state.cursor.line = cursor_line;
+            self.state.cursor.col = cursor_col;
             self.on_buffer_modified();
         }
     }
@@ -1905,6 +1976,33 @@ impl Editor {
         self.needs_render = true;
     }
 
+    /// Switch the active keymap at runtime (e.g., via `:keymap vim`).
+    pub fn switch_keymap(&mut self, name: &str) {
+        use crate::types::Keymap;
+        let keymap = match name {
+            "vim" => Keymap::Vim,
+            "emacs" => Keymap::Emacs,
+            _ => {
+                eprintln!("[editor] Unknown keymap: {} (use vim or emacs)", name);
+                return;
+            }
+        };
+        self.keymap_handler = create_keymap(keymap);
+        // Reset all pending state to avoid stuck operators
+        self.pending_operator = None;
+        self.pending_count = None;
+        self.pending_register = None;
+        self.pending_mark = None;
+        self.pending_macro_play = None;
+        self.pending_text_object = None;
+        // Reset editor mode
+        self.state.mode = Mode::Normal;
+        self.state.visual_start = None;
+        self.state.visual_type = None;
+        self.state.command_buffer.clear();
+        self.needs_render = true;
+    }
+
     pub(crate) async fn handle_command(&mut self, key: KeyCode) {
         if self.state.has_confirmation() {
             self.handle_confirmation(key).await;
@@ -1980,6 +2078,10 @@ impl Editor {
                     }
                     "e!" => {
                         self.reload_file_discard().await;
+                    }
+                    cmd if cmd.starts_with("keymap ") => {
+                        let keymap_name = cmd.trim_start_matches("keymap ").trim();
+                        self.switch_keymap(keymap_name);
                     }
                     _ => {
                         if let Some(query) = cmd.strip_prefix('/') {
@@ -2256,7 +2358,11 @@ impl Editor {
             _ => return,
         };
 
-        let direction = if ch == matching { 1 } else { -1 };
+        let direction: i32 = match ch {
+            '(' | '[' | '{' => 1,
+            ')' | ']' | '}' => -1,
+            _ => return,
+        };
 
         let mut count = 1;
         let mut current_line = line;
@@ -2444,14 +2550,26 @@ impl Editor {
             return;
         }
 
+        // Get current and next line content (without trailing newline)
         let current_line = self.buffer.get_line(line);
-        let _next_line = self.buffer.get_line(line + 1);
+        let current_stripped = current_line.trim_end_matches('\n');
+        let next_line = self.buffer.get_line(line + 1);
+        let next_stripped = next_line.trim_end_matches('\n');
 
-        self.buffer.delete_line(line + 1);
+        // merge_with_prev_line(line+1) removes the \n at end of `line`, joining line and line+1
+        // returns the length of original line minus 1 (position after "hello" in "hello\n")
+        let join_pos = self.buffer.merge_with_prev_line(line + 1);
 
-        if current_line.ends_with(' ') || current_line.ends_with('\t') {
+        // Add space if neither side has adjacent whitespace
+        let needs_space = !current_stripped.ends_with(' ')
+            && !current_stripped.ends_with('\t')
+            && !next_stripped.starts_with(' ')
+            && !next_stripped.is_empty();
+        if needs_space {
+            self.buffer.insert(line, join_pos, " ");
+            self.state.cursor.col = join_pos + 1;
         } else {
-            self.buffer.insert(line, current_line.len(), " ");
+            self.state.cursor.col = join_pos;
         }
 
         self.dot_last_action = Some(DotAction::Change {
@@ -2546,8 +2664,20 @@ impl Editor {
     pub(crate) fn delete_char_forward(&mut self) {
         let line = self.buffer.get_line(self.state.cursor.line);
         if self.state.cursor.col < line.len() {
+            let deleted_char = line[self.state.cursor.col..self.state.cursor.col + 1].to_string();
+            let mod_count = self.buffer.modification_count();
             self.buffer
                 .delete(self.state.cursor.line, self.state.cursor.col);
+            self.undo_manager.push(Edit {
+                edit_type: EditType::Delete {
+                    line: self.state.cursor.line,
+                    col: self.state.cursor.col,
+                    text: deleted_char,
+                },
+                cursor_before: self.state.cursor,
+                cursor_after: self.state.cursor,
+                modification_count: mod_count,
+            });
             self.state.dirty = true;
             self.needs_render = true;
         }
@@ -2555,9 +2685,16 @@ impl Editor {
 
     pub(crate) fn kill_line(&mut self) {
         let line = self.buffer.get_line(self.state.cursor.line);
-        if self.state.cursor.col < line.len() {
-            let end_col = line.len();
-            let deleted = line[self.state.cursor.col..].to_string();
+        let line_len = line.len();
+        // Exclude trailing newline from kill range
+        let end_col = if line_len > 0 && line.ends_with('\n') {
+            line_len - 1
+        } else {
+            line_len
+        };
+        if self.state.cursor.col < end_col {
+            let deleted = line[self.state.cursor.col..end_col].to_string();
+            self.kill_ring.push(&deleted);
             let mod_count = self.buffer.modification_count();
             self.buffer.delete_range(
                 self.state.cursor.line,
@@ -2645,8 +2782,34 @@ impl Editor {
         }
     }
 
+    /// Emacs M-y: cycle kill-ring after yank.
+    /// 1. Undo the previous yank (delete inserted text).
+    /// 2. Advance the kill-ring index and yank the next entry.
     pub fn yank_pop(&mut self) {
-        self.undo();
+        let start = match self.yank_start {
+            Some(p) => p,
+            None => return,
+        };
+        let len = self.yank_length;
+        if len == 0 {
+            return;
+        }
+        // Remove the previously yanked text
+        let start_char = self.buffer.line_to_char(start.line.saturating_sub(1)) + start.col;
+        self.buffer.remove_range(start_char, start_char + len);
+        // Get the next entry from kill-ring (clone to avoid borrow conflict)
+        let next = self.kill_ring.yank_pop().map(|s| s.to_string());
+        if let Some(ref text) = next {
+            self.buffer.insert(start.line, start.col, text);
+            self.yank_length = text.chars().count();
+            self.state.cursor = start;
+            self.state.cursor.col += self.yank_length;
+        } else {
+            self.yank_start = None;
+            self.yank_length = 0;
+        }
+        self.state.dirty = true;
+        self.needs_render = true;
     }
 
     pub fn transpose_chars(&mut self) {
@@ -2654,15 +2817,19 @@ impl Editor {
         let col = self.state.cursor.col;
 
         if col > 0 {
-            let char1 = self.buffer.get_line(line).chars().nth(col - 1);
-            let char2 = self.buffer.get_line(line).chars().nth(col);
+            let line_str = self.buffer.get_line(line);
+            let chars: Vec<char> = line_str.chars().collect();
+            if col < chars.len() {
+                let c1 = chars[col - 1];
+                let c2 = chars[col];
 
-            if let (Some(c1), Some(c2)) = (char1, char2) {
+                // Delete in reverse order (higher index first) to avoid shifting
                 self.buffer.delete(line, col);
                 self.buffer.delete(line, col - 1);
-                self.buffer.insert_char(line, col - 2, c2);
-                self.buffer.insert_char(line, col - 1, c1);
-                self.state.cursor.col = (col + 1).min(self.buffer.get_line(line).len());
+                // Insert swapped: c2 then c1
+                self.buffer.insert_char(line, col - 1, c2);
+                self.buffer.insert_char(line, col, c1);
+                self.state.cursor.col = (col + 1).min(self.buffer.get_line(line).len().saturating_sub(1));
                 self.state.dirty = true;
                 self.needs_render = true;
             }
@@ -2806,10 +2973,14 @@ impl Editor {
 
     /// C-y: kill-ring から最新エントリを現在位置に挿入する。
     pub fn yank_from_kill_ring(&mut self) {
-        if let Some(text) = self.kill_ring.yank() {
+        let text = self.kill_ring.yank().map(|s| s.to_string());
+        if let Some(ref text) = text {
+            self.yank_start = Some(self.state.cursor);
+            self.yank_length = text.chars().count();
+            self.kill_ring.reset_index();
             self.buffer
                 .insert(self.state.cursor.line, self.state.cursor.col, text);
-            self.state.cursor.col += text.chars().count();
+            self.state.cursor.col += self.yank_length;
             self.state.dirty = true;
             self.needs_render = true;
         }
@@ -2929,6 +3100,8 @@ mod tests {
             highlights: Vec::new(),
             insert_accum: String::new(),
             insert_start_pos: None,
+            yank_start: None,
+            yank_length: 0,
         }
     }
 
@@ -3195,7 +3368,7 @@ mod tests {
         editor.set_buffer_for_test("hello\n");
         editor.state.cursor.col = 0;
         editor.handle_normal(KeyCode::Char('$')).await;
-        assert_eq!(editor.state.cursor.col, 5);
+        assert_eq!(editor.state.cursor.col, 4);
     }
 
     #[tokio::test]
