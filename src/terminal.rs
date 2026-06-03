@@ -81,7 +81,7 @@ impl Terminal {
     }
 
     pub fn clear_screen(&mut self) -> io::Result<()> {
-        execute!(self.stdout, Clear(ClearType::Purge))
+        execute!(self.stdout, Clear(ClearType::All))
     }
 
     pub fn write_line(&mut self, row: u16, content: &str) -> io::Result<()> {

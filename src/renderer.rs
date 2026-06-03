@@ -394,14 +394,14 @@ impl Default for Renderer {
 
 /// Compute how many screen rows a line occupies when wrapped.
 fn wrapped_rows(text: &str, max_width: usize, wrap: bool) -> usize {
-    if !wrap || max_width == 0 || text.is_empty() {
+    if !wrap || max_width == 0 {
         return 1;
     }
-    let len = text.len();
-    if len == 0 {
+    let char_count = text.chars().count();
+    if char_count == 0 {
         return 1;
     }
-    len.div_ceil(max_width)
+    char_count.div_ceil(max_width)
 }
 
 /// Split styled characters into wrapped segments at word boundaries.

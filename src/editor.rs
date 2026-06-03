@@ -46,7 +46,6 @@ pub struct Editor {
     pub(crate) last_fchar: Option<char>,
     pub(crate) last_fchar_till: bool,
     pub(crate) keymap_handler: Rc<RefCell<dyn KeymapHandler>>,
-    pub(crate) pending_save: bool,
     pub(crate) highlights: Vec<Vec<(Style, String)>>,
     pub(crate) kill_ring: KillRing,
     /// Accumulated characters typed during the current insert-mode session.
@@ -185,7 +184,6 @@ impl Editor {
             last_fchar: None,
             last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
-            pending_save: false,
             highlights: Vec::new(),
             insert_accum: String::new(),
             insert_start_pos: None,
@@ -196,22 +194,7 @@ impl Editor {
     pub fn new_headless_for_test(keymap: Keymap) -> Result<Self, Box<dyn std::error::Error>> {
         let terminal = Terminal::new()?;
         let buffer = TextBuffer::new();
-        let state = EditorState {
-            mode: Mode::Normal,
-            cursor: crate::types::Position { line: 1, col: 0 },
-            file_path: None,
-            dirty: false,
-            command_buffer: String::new(),
-            visual_start: None,
-            visual_type: None,
-            marks: crate::types::Marks::new(),
-            macros: crate::types::Macros::new(),
-            confirmation_prompt: None,
-            show_line_numbers: true,
-            wrap: true,
-            mark: None,
-            region_active: false,
-        };
+        let state = EditorState::default();
 
         Ok(Editor::new_shared(
             terminal,
@@ -250,20 +233,9 @@ impl Editor {
         }
 
         let state = EditorState {
-            mode: Mode::Normal,
-            cursor: crate::types::Position { line: 1, col: 0 },
             file_path: buffer.file_path.clone(),
-            dirty: false,
-            command_buffer: String::new(),
-            visual_start: None,
-            visual_type: None,
-            marks: crate::types::Marks::new(),
-            macros: crate::types::Macros::new(),
-            confirmation_prompt: None,
-            show_line_numbers: true,
-            wrap: true,
-            mark: None,
-            region_active: false,
+            cursor: Position { line: 1, col: 0 },
+            ..EditorState::default()
         };
 
         Ok(Editor::new_shared(
@@ -292,8 +264,6 @@ impl Editor {
 
         while self.running {
             self.state.dirty = self.buffer.dirty;
-
-            self.consume_pending_save().await;
 
             tokio::select! {
                 Some(event) = reader.next() => {
@@ -2003,7 +1973,7 @@ impl Editor {
     }
 
     async fn reload_file_discard(&mut self) {
-        self.buffer.dirty = false;
+        // reload_file replaces self.buffer entirely, making dirty/reset unnecessary
         self.reload_file().await;
     }
 
@@ -2712,13 +2682,6 @@ impl Editor {
 
     // ── End Emacs Mark/Region ──────────────────────────────────
 
-    pub async fn consume_pending_save(&mut self) {
-        if self.pending_save {
-            self.pending_save = false;
-            self.save_file_async().await;
-        }
-    }
-
     pub async fn save_file_async(&mut self) {
         if let Err(e) = self.buffer.save_file().await {
             eprintln!("[editor] Save failed: {}", e);
@@ -2826,7 +2789,6 @@ mod tests {
             last_fchar: None,
             last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
-            pending_save: false,
             kill_ring: KillRing::new(),
             highlights: Vec::new(),
             insert_accum: String::new(),
@@ -2863,18 +2825,6 @@ mod tests {
         assert!(editor.state.has_confirmation());
         let prompt = editor.state.confirmation_prompt.as_ref().unwrap();
         assert!(matches!(prompt.action, ConfirmAction::Quit));
-    }
-
-    #[tokio::test]
-    async fn consume_pending_save_clears_flag_after_attempt() {
-        let mut editor = test_editor(Keymap::Emacs);
-        editor.pending_save = true;
-        editor.buffer.dirty = true;
-
-        editor.consume_pending_save().await;
-
-        assert!(!editor.pending_save);
-        assert!(editor.needs_render);
     }
 
     #[tokio::test]

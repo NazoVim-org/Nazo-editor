@@ -172,10 +172,21 @@ impl Default for EditorState {
 
 #[derive(Debug, Clone)]
 pub enum PluginEvent {
-    ModeChange { from: Mode, to: Mode },
+    ModeChange {
+        from: Mode,
+        to: Mode,
+    },
     BufferChange,
-    Key { mode: Mode, key: char },
-    BufferSave { file_path: Option<PathBuf> },
+    Key {
+        mode: Mode,
+        key: char,
+    },
+    BufferSave {
+        file_path: Option<PathBuf>,
+    },
+    /// All plugins have been loaded and their `setup()` methods called.
+    /// The editor event loop is about to start (or has just started).
+    Ready,
 }
 
 #[derive(Clone, Debug)]

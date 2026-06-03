@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 pub type CommandFn = Box<dyn Fn(Vec<String>)>;
 pub type EventFn = Box<dyn Fn(&PluginEvent)>;
-pub type LogFn = dyn Fn(&str);
+pub type LogFn = fn(&str);
 
 #[derive(Clone)]
 pub struct PluginApi {
@@ -14,12 +14,16 @@ pub struct PluginApi {
     pub log_fn: Rc<LogFn>,
 }
 
+fn default_log(msg: &str) {
+    eprintln!("[plugin] {}", msg);
+}
+
 impl PluginApi {
     pub fn new() -> Self {
         Self {
             commands: Rc::new(RefCell::new(HashMap::new())),
             event_handlers: Rc::new(RefCell::new(HashMap::new())),
-            log_fn: Rc::new(|msg| eprintln!("[plugin] {}", msg)),
+            log_fn: Rc::new(default_log),
         }
     }
 
