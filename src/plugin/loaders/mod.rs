@@ -1,4 +1,4 @@
-// pub mod javascript;
+pub mod javascript;
 pub mod lisp;
 pub mod lua;
 pub mod nix;
@@ -84,7 +84,7 @@ pub fn create_default_registry() -> LoaderRegistry {
     let mut registry = LoaderRegistry::new();
     registry.register(Box::new(lua::LuaLoader));
     registry.register(Box::new(lisp::LispLoader));
-    // registry.register(Box::new(javascript::JavaScriptLoader));
+    registry.register(Box::new(javascript::JavaScriptLoader));
     registry.register(Box::new(nix::NixLoader));
     registry.register(Box::new(rust::RustLoader));
     registry
