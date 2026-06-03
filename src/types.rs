@@ -179,7 +179,10 @@ pub enum PluginEvent {
     BufferChange,
     Key {
         mode: Mode,
-        key: char,
+        /// String representation of the key (e.g. "a", "Enter", "Esc", "F1").
+        /// For `KeyCode::Char(c)`, this is `c.to_string()`.
+        /// For other keys, this is the Debug name.
+        key: String,
     },
     BufferSave {
         file_path: Option<PathBuf>,

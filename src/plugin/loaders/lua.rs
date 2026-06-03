@@ -1,6 +1,6 @@
 use crate::plugin::{Plugin, PluginApi};
 use crate::types::PluginEvent;
-use mlua::{Function, Lua, RegistryKey, Table};
+use mlua::{Function, Lua, RegistryKey, Table, Value};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -9,12 +9,6 @@ pub struct LuaPlugin {
     lua: Lua,
     /// Key in the Lua registry referencing the plugin's returned table.
     table_key: RegistryKey,
-    /// Key in the Lua registry referencing a table of command-name → function.
-    #[allow(dead_code)]
-    commands_key: RegistryKey,
-    /// Key in the Lua registry referencing a table of event-name → [handler].
-    #[allow(dead_code)]
-    events_key: RegistryKey,
 }
 
 /// Map PluginEvent -> the Lua-side event name string used in `on()`.
@@ -24,8 +18,30 @@ fn plugin_event_name(event: &PluginEvent) -> Option<&'static str> {
         PluginEvent::BufferChange => Some("buffer_change"),
         PluginEvent::Key { .. } => Some("key"),
         PluginEvent::BufferSave { .. } => Some("buffer_save"),
-        PluginEvent::Ready => Some("editor:ready"),
+        PluginEvent::Ready => Some("ready"),
     }
+}
+
+/// Build a Lua table with event data fields from a PluginEvent.
+fn event_data_table<'lua>(lua: &'lua Lua, event: &PluginEvent) -> mlua::Result<Table<'lua>> {
+    let t = lua.create_table()?;
+    match event {
+        PluginEvent::ModeChange { from, to } => {
+            t.set("from", format!("{:?}", from))?;
+            t.set("to", format!("{:?}", to))?;
+        }
+        PluginEvent::Key { mode, key } => {
+            t.set("mode", format!("{:?}", mode))?;
+            t.set("key", key.to_string())?;
+        }
+        PluginEvent::BufferSave { file_path } => {
+            if let Some(p) = file_path {
+                t.set("file", p.to_string_lossy().as_ref())?;
+            }
+        }
+        PluginEvent::BufferChange | PluginEvent::Ready => {}
+    }
+    Ok(t)
 }
 
 impl Plugin for LuaPlugin {
@@ -131,13 +147,19 @@ impl Plugin for LuaPlugin {
             _ => return,
         };
 
-        // Iterate over all handlers in the list
+        // Build event data table
+        let data = match event_data_table(&self.lua, event) {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+
+        // Iterate over all handlers and pass event data
         for (_idx, handler) in list.pairs::<usize, Function>().flatten() {
-            let _ = handler.call::<_, ()>(());
+            let _ = handler.call::<_, ()>(data.clone());
         }
     }
 
-    fn execute_command(&mut self, cmd: &str, _args: Vec<String>) -> bool {
+    fn execute_command(&mut self, cmd: &str, args: Vec<String>) -> bool {
         let reg: Table = match self.lua.named_registry_value("ijevim_cmd_registry") {
             Ok(t) => t,
             Err(_) => return false,
@@ -146,7 +168,12 @@ impl Plugin for LuaPlugin {
             Ok(f) => f,
             Err(_) => return false,
         };
-        f.call::<_, ()>(()).is_ok()
+        // Convert args to Lua values
+        let lua_args: Vec<Value> = args
+            .iter()
+            .filter_map(|a| self.lua.create_string(a).ok().map(Value::String))
+            .collect();
+        f.call::<_, ()>(lua_args).is_ok()
     }
 }
 
@@ -207,21 +234,6 @@ impl super::Loader for LuaLoader {
             }
         };
 
-        // Pre-register empty command and event tables
-        let cmd_table = lua
-            .create_table()
-            .map_err(|e| super::LoaderError::Parse(format!("Lua error: {}", e)))?;
-        let commands_key = lua
-            .create_registry_value(cmd_table)
-            .map_err(|e| super::LoaderError::Parse(format!("Registry error: {}", e)))?;
-
-        let ev_table = lua
-            .create_table()
-            .map_err(|e| super::LoaderError::Parse(format!("Lua error: {}", e)))?;
-        let events_key = lua
-            .create_registry_value(ev_table)
-            .map_err(|e| super::LoaderError::Parse(format!("Registry error: {}", e)))?;
-
         let table_key = lua
             .create_registry_value(plugin_table)
             .map_err(|e| super::LoaderError::Parse(format!("Registry error: {}", e)))?;
@@ -230,8 +242,6 @@ impl super::Loader for LuaLoader {
             name,
             lua,
             table_key,
-            commands_key,
-            events_key,
         }))
     }
 }
