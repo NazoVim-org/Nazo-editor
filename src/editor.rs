@@ -33,6 +33,8 @@ pub struct Editor {
     pub(crate) last_keypress_time: Instant,
     pub(crate) needs_render: bool,
     pub(crate) pending_operator: Option<char>,
+    /// Numeric count prefix (e.g., `3` in `3j`). Accumulated digit by digit.
+    pub(crate) pending_count: Option<usize>,
     pub(crate) pending_register: Option<char>,
     pub(crate) pending_mark: Option<char>,
     pub(crate) pending_macro_play: Option<char>,
@@ -171,6 +173,7 @@ impl Editor {
             last_keypress_time: Instant::now(),
             needs_render: true,
             pending_operator: None,
+            pending_count: None,
             pending_register: None,
             pending_mark: None,
             pending_macro_play: None,
@@ -323,20 +326,65 @@ impl Editor {
     /// Emit a key-press event to the plugin system and record macros if recording.
     /// Called by both Vim and Emacs keymap handlers.
     pub(crate) fn emit_key_event(&mut self, key: KeyCode) {
-        if let KeyCode::Char(c) = key {
-            self.plugin_manager.emit(PluginEvent::Key {
-                mode: self.state.mode,
-                key: c,
-            });
+        let key_str = match key {
+            KeyCode::Char(c) => c.to_string(),
+            KeyCode::Enter => "Enter".to_string(),
+            KeyCode::Esc => "Esc".to_string(),
+            KeyCode::Backspace => "Backspace".to_string(),
+            KeyCode::Tab => "Tab".to_string(),
+            KeyCode::BackTab => "BackTab".to_string(),
+            KeyCode::Delete => "Delete".to_string(),
+            KeyCode::Insert => "Insert".to_string(),
+            KeyCode::Home => "Home".to_string(),
+            KeyCode::End => "End".to_string(),
+            KeyCode::PageUp => "PageUp".to_string(),
+            KeyCode::PageDown => "PageDown".to_string(),
+            KeyCode::Left => "Left".to_string(),
+            KeyCode::Right => "Right".to_string(),
+            KeyCode::Up => "Up".to_string(),
+            KeyCode::Down => "Down".to_string(),
+            KeyCode::F(n) => format!("F{}", n),
+            KeyCode::Null => "Null".to_string(),
+            KeyCode::CapsLock => "CapsLock".to_string(),
+            KeyCode::ScrollLock => "ScrollLock".to_string(),
+            KeyCode::NumLock => "NumLock".to_string(),
+            KeyCode::PrintScreen => "PrintScreen".to_string(),
+            KeyCode::Pause => "Pause".to_string(),
+            KeyCode::Menu => "Menu".to_string(),
+            KeyCode::KeypadBegin => "KeypadBegin".to_string(),
+            KeyCode::Media(m) => format!("Media({:?})", m),
+            KeyCode::Modifier(m) => format!("Modifier({:?})", m),
+        };
 
-            if self.state.macros.is_recording() {
-                let key_str = c.to_string();
-                self.state.macros.add_key(key_str);
-            }
+        self.plugin_manager.emit(PluginEvent::Key {
+            mode: self.state.mode,
+            key: key_str.clone(),
+        });
+
+        if self.state.macros.is_recording() {
+            self.state.macros.add_key(key_str);
         }
     }
 
+    /// Take the accumulated count prefix, defaulting to 1.
+    fn take_count(&mut self) -> usize {
+        self.pending_count.take().unwrap_or(1)
+    }
+
     pub(crate) async fn handle_normal(&mut self, key: KeyCode) {
+        // ── Numeric count prefix ─────────────────────────────────
+        // Accumulate digits 1-9 into pending_count.
+        // '0' is only accumulated if there's already a pending count (e.g., "20j").
+        // Standalone '0' falls through to the match arm for column-zero.
+        if let KeyCode::Char(c) = key {
+            if c.is_ascii_digit() && (c != '0' || self.pending_count.is_some()) {
+                let digit = c.to_digit(10).unwrap() as usize;
+                self.pending_count = Some(self.pending_count.unwrap_or(0) * 10 + digit);
+                self.needs_render = true;
+                return;
+            }
+        }
+
         // Resolve 3-key operator sequences (e.g., diw, da(, ciw)
         if let Some(pto) = self.pending_text_object.take() {
             match pto.operator {
@@ -355,33 +403,42 @@ impl Editor {
         let line_count = self.buffer.line_count();
 
         if let Some(op) = self.pending_operator {
-            self.handle_operator(op, key).await;
+            let count = self.take_count();
+            self.handle_operator(op, key, count).await;
             return;
         }
 
         match key {
+            // ── Motions with count support ───────────────────────
             KeyCode::Char('h') => {
-                self.state.cursor.col = self.state.cursor.col.saturating_sub(1);
+                let count = self.take_count();
+                self.state.cursor.col = self.state.cursor.col.saturating_sub(count);
                 self.needs_render = true;
             }
             KeyCode::Char('l') => {
+                let count = self.take_count();
                 let line_len = self.buffer.get_line(self.state.cursor.line).len();
-                self.state.cursor.col = (self.state.cursor.col + 1).min(line_len.saturating_sub(1));
+                self.state.cursor.col =
+                    (self.state.cursor.col + count).min(line_len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('j') => {
-                self.state.cursor.line = (self.state.cursor.line + 1).min(line_count);
+                let count = self.take_count();
+                self.state.cursor.line = (self.state.cursor.line + count).min(line_count);
                 let len = self.buffer.get_line(self.state.cursor.line).len();
                 self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('k') => {
-                self.state.cursor.line = self.state.cursor.line.saturating_sub(1).max(1);
+                let count = self.take_count();
+                self.state.cursor.line = self.state.cursor.line.saturating_sub(count).max(1);
                 let len = self.buffer.get_line(self.state.cursor.line).len();
                 self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('i') => {
+                // TODO: use count for insert repetition
+                let _count = self.take_count();
                 let prev_mode = self.state.mode;
                 self.insert_accum.clear();
                 self.insert_start_pos = Some(self.state.cursor);
@@ -392,7 +449,37 @@ impl Editor {
                 });
                 self.needs_render = true;
             }
+            KeyCode::Char('a') => {
+                let _count = self.take_count();
+                let prev_mode = self.state.mode;
+                self.insert_accum.clear();
+                self.insert_start_pos = Some(self.state.cursor);
+                if self.state.cursor.col < self.buffer.get_line(self.state.cursor.line).len() {
+                    self.state.cursor.col += 1;
+                }
+                self.state.mode = Mode::Insert;
+                self.plugin_manager.emit(PluginEvent::ModeChange {
+                    from: prev_mode,
+                    to: Mode::Insert,
+                });
+                self.needs_render = true;
+            }
+            KeyCode::Char('A') => {
+                let _count = self.take_count();
+                let prev_mode = self.state.mode;
+                self.insert_accum.clear();
+                self.insert_start_pos = Some(self.state.cursor);
+                let line_len = self.buffer.get_line(self.state.cursor.line).len();
+                self.state.cursor.col = line_len;
+                self.state.mode = Mode::Insert;
+                self.plugin_manager.emit(PluginEvent::ModeChange {
+                    from: prev_mode,
+                    to: Mode::Insert,
+                });
+                self.needs_render = true;
+            }
             KeyCode::Char(':') => {
+                let _count = self.take_count();
                 let prev_mode = self.state.mode;
                 self.state.mode = Mode::Command;
                 self.state.command_buffer.clear();
@@ -403,6 +490,7 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('/') => {
+                let _count = self.take_count();
                 let prev_mode = self.state.mode;
                 self.state.mode = Mode::Command;
                 self.state.command_buffer.clear();
@@ -418,21 +506,31 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('^') => {
+                let _count = self.take_count();
                 let line = self.buffer.get_line(self.state.cursor.line);
                 let first_non_blank = line.chars().position(|c| !c.is_whitespace()).unwrap_or(0);
                 self.state.cursor.col = first_non_blank;
                 self.needs_render = true;
             }
             KeyCode::Char('$') => {
-                let line_len = self.buffer.get_line(self.state.cursor.line).len();
+                let count = self.take_count();
+                let target = (self.state.cursor.line + count - 1).min(self.buffer.line_count());
+                let line_len = self.buffer.get_line(target).len();
+                self.state.cursor.line = target;
                 self.state.cursor.col = line_len.saturating_sub(1);
                 self.needs_render = true;
             }
             KeyCode::Char('D') => {
-                self.kill_line();
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.kill_line();
+                }
             }
             KeyCode::Char('C') => {
-                self.kill_line();
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.kill_line();
+                }
                 let prev_mode = self.state.mode;
                 self.state.mode = Mode::Insert;
                 self.plugin_manager.emit(PluginEvent::ModeChange {
@@ -442,6 +540,7 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('S') => {
+                let _count = self.take_count();
                 let content = self.buffer.get_line(self.state.cursor.line);
                 self.register.set('"', &content);
                 self.buffer.delete_line(self.state.cursor.line);
@@ -454,15 +553,22 @@ impl Editor {
                 self.on_buffer_modified();
             }
             KeyCode::Char('*') => {
+                let _count = self.take_count();
                 self.search_word_under_cursor();
                 self.needs_render = true;
             }
             KeyCode::Char('n') => {
-                self.search_next();
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.search_next();
+                }
                 self.needs_render = true;
             }
             KeyCode::Char('N') => {
-                self.search_prev();
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.search_prev();
+                }
                 self.needs_render = true;
             }
             KeyCode::Char('?') => {
@@ -595,74 +701,72 @@ impl Editor {
                         self.pending_operator = Some('g');
                     }
                     KeyCode::Char('G') => {
-                        self.state.cursor.line = self.buffer.line_count().max(1);
-                        let len = self.buffer.get_line(self.state.cursor.line).len();
+                        // G without count goes to last line; with count goes to that line
+                        let target = match self.pending_count.take() {
+                            Some(c) => c.min(self.buffer.line_count()).max(1),
+                            None => self.buffer.line_count().max(1),
+                        };
+                        self.state.cursor.line = target;
+                        let len = self.buffer.get_line(target).len();
                         self.state.cursor.col = len.saturating_sub(1);
                         self.needs_render = true;
                     }
                     KeyCode::Char('%') => {
+                        let _count = self.take_count();
                         self.jump_to_matching_bracket();
                         self.needs_render = true;
                     }
                     KeyCode::Char('x') => {
-                        self.delete_char('"');
+                        let count = self.take_count();
+                        for _ in 0..count {
+                            self.delete_char('"');
+                        }
                         self.needs_render = true;
                     }
                     KeyCode::Char('.') => {
+                        let _count = self.take_count();
                         self.repeat_last_action().await;
                         self.needs_render = true;
                     }
                     KeyCode::Char('w') => {
-                        self.move_word_forward();
+                        let count = self.take_count();
+                        for _ in 0..count {
+                            self.move_word_forward();
+                        }
                         self.needs_render = true;
                     }
                     KeyCode::Char('b') => {
-                        self.move_word_backward();
+                        let count = self.take_count();
+                        for _ in 0..count {
+                            self.move_word_backward();
+                        }
                         self.needs_render = true;
                     }
                     KeyCode::Char('e') => {
-                        self.move_word_end();
+                        let count = self.take_count();
+                        for _ in 0..count {
+                            self.move_word_end();
+                        }
                         self.needs_render = true;
                     }
                     KeyCode::Char('o') => {
+                        let _count = self.take_count();
                         self.open_line(false);
                         self.needs_render = true;
                     }
                     KeyCode::Char('O') => {
+                        let _count = self.take_count();
                         self.open_line(true);
-                        self.needs_render = true;
-                    }
-                    KeyCode::Char('a') => {
-                        let prev_mode = self.state.mode;
-                        self.state.mode = Mode::Insert;
-                        self.state.cursor.col = (self.state.cursor.col + 1).min(
-                            self.buffer
-                                .get_line(self.state.cursor.line)
-                                .len()
-                                .saturating_sub(1),
-                        );
-                        self.plugin_manager.emit(PluginEvent::ModeChange {
-                            from: prev_mode,
-                            to: Mode::Insert,
-                        });
-                        self.needs_render = true;
-                    }
-                    KeyCode::Char('A') => {
-                        let prev_mode = self.state.mode;
-                        self.state.mode = Mode::Insert;
-                        let line_len = self.buffer.get_line(self.state.cursor.line).len();
-                        self.state.cursor.col = line_len.saturating_sub(1);
-                        self.plugin_manager.emit(PluginEvent::ModeChange {
-                            from: prev_mode,
-                            to: Mode::Insert,
-                        });
                         self.needs_render = true;
                     }
                     KeyCode::Char('c') => {
                         self.pending_operator = Some('c');
                     }
                     KeyCode::Char('J') => {
-                        self.join_lines();
+                        let count = self.take_count();
+                        for _ in 0..count {
+                            self.join_lines();
+                        }
                         self.needs_render = true;
                     }
                     KeyCode::Char('>') => {
@@ -678,6 +782,7 @@ impl Editor {
                         self.pending_operator = Some('Z');
                     }
                     KeyCode::Char('s') => {
+                        let _count = self.take_count();
                         self.delete_char('"');
                         let prev_mode = self.state.mode;
                         self.state.mode = Mode::Insert;
@@ -772,14 +877,15 @@ impl Editor {
                     if let Some(op) = self.pending_operator {
                         self.pending_operator = None;
                         let reg = r;
-                        self.execute_operator_with_register(op, reg, key).await;
+                        let count = self.take_count();
+                        self.execute_operator_with_register(op, reg, key, count).await;
                     }
                 }
             }
         }
     }
 
-    async fn handle_operator(&mut self, op: char, key: KeyCode) {
+    async fn handle_operator(&mut self, op: char, key: KeyCode, count: usize) {
         let register = self.pending_register.unwrap_or('"');
         self.pending_operator = None;
         self.pending_register = None;
@@ -787,7 +893,9 @@ impl Editor {
         match op {
             'y' => match key {
                 KeyCode::Char('y') => {
-                    self.yank_line(register);
+                    for _ in 0..count {
+                        self.yank_line(register);
+                    }
                 }
                 KeyCode::Char('w') => {
                     self.yank_word(register);
@@ -837,9 +945,11 @@ impl Editor {
             },
             'c' => match key {
                 KeyCode::Char('c') => {
-                    let content = self.buffer.get_line(self.state.cursor.line);
-                    self.register.set(register, &content);
-                    self.buffer.delete_line(self.state.cursor.line);
+                    for _ in 0..count {
+                        let content = self.buffer.get_line(self.state.cursor.line);
+                        self.register.set(register, &content);
+                        self.buffer.delete_line(self.state.cursor.line);
+                    }
                     let prev_mode = self.state.mode;
                     self.state.mode = Mode::Insert;
                     self.plugin_manager.emit(PluginEvent::ModeChange {
@@ -847,7 +957,7 @@ impl Editor {
                         to: Mode::Insert,
                     });
                     self.dot_last_action = Some(DotAction::Change {
-                        text: content,
+                        text: String::new(),
                         line: self.state.cursor.line,
                         col: 0,
                     });
@@ -901,12 +1011,16 @@ impl Editor {
             },
             '>' => {
                 if let KeyCode::Char('>') = key {
-                    self.indent_lines(register, true);
+                    for _ in 0..count {
+                        self.indent_lines(register, true);
+                    }
                 }
             }
             '<' => {
                 if let KeyCode::Char('<') = key {
-                    self.indent_lines(register, false);
+                    for _ in 0..count {
+                        self.indent_lines(register, false);
+                    }
                 }
             }
             'f' => {
@@ -1249,13 +1363,17 @@ impl Editor {
         }
     }
 
-    async fn execute_operator_with_register(&mut self, op: char, register: char, _key: KeyCode) {
+    async fn execute_operator_with_register(&mut self, op: char, register: char, _key: KeyCode, count: usize) {
         match op {
             'y' => {
-                self.yank_line(register);
+                for _ in 0..count {
+                    self.yank_line(register);
+                }
             }
             'd' => {
-                self.delete_line(register);
+                for _ in 0..count {
+                    self.delete_line(register);
+                }
             }
             _ => {}
         }
@@ -1869,8 +1987,18 @@ impl Editor {
                             self.handle_write_path(cmd).await;
                         } else if cmd.starts_with("wq ") || cmd.starts_with("wq! ") {
                             self.handle_write_quit_path(cmd).await;
-                        } else if !self.plugin_manager.execute_command(cmd) {
-                            eprintln!("[editor] Unknown command: {}", cmd);
+                        } else {
+                            // Split cmd into command name and args
+                            let parts: Vec<&str> = cmd.splitn(2, ' ').collect();
+                            let cmd_name = parts[0];
+                            let args: Vec<String> = if parts.len() > 1 {
+                                parts[1].split(' ').map(|s| s.to_string()).collect()
+                            } else {
+                                vec![]
+                            };
+                            if !self.plugin_manager.execute_command(cmd_name, args) {
+                                eprintln!("[editor] Unknown command: {}", cmd);
+                            }
                         }
                     }
                 }
@@ -2776,6 +2904,7 @@ mod tests {
             last_keypress_time: Instant::now(),
             needs_render: false,
             pending_operator: None,
+            pending_count: None,
             pending_register: None,
             pending_mark: None,
             pending_macro_play: None,
