@@ -6,7 +6,6 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 pub struct EmacsKeymap {
     prefix_state: EmacsPrefixState,
-    pending_save: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -19,7 +18,6 @@ impl EmacsKeymap {
     pub fn new() -> Self {
         Self {
             prefix_state: EmacsPrefixState::None,
-            pending_save: false,
         }
     }
 }
@@ -32,11 +30,6 @@ impl KeymapHandler for EmacsKeymap {
         modifiers: KeyModifiers,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>> {
         Box::pin(async move {
-            if self.pending_save {
-                self.pending_save = false;
-                editor.pending_save = true;
-            }
-
             let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
             let has_alt = modifiers.contains(KeyModifiers::ALT);
 
@@ -52,7 +45,7 @@ impl KeymapHandler for EmacsKeymap {
                     self.prefix_state = EmacsPrefixState::None;
                     match (has_ctrl, key) {
                         (true, KeyCode::Char('s')) => {
-                            self.pending_save = true;
+                            editor.save_file_async().await;
                             return;
                         }
                         (true, KeyCode::Char('c')) => {
@@ -129,10 +122,10 @@ impl KeymapHandler for EmacsKeymap {
                     editor.yank_from_kill_ring();
                 }
                 (true, KeyCode::Char('o')) => {
-                    // Spec decision: keep C-o as a legacy direct save trigger.
-                    // Preferred Emacs-style save is C-x C-s, but C-o remains supported
+                    // C-o is a legacy direct save trigger.
+                    // Preferred Emacs-style save is C-x C-s, but C-o remains
                     // for compatibility with existing ijevim behavior.
-                    editor.pending_save = true;
+                    editor.save_file_async().await;
                 }
                 (true, KeyCode::Char('s')) => {
                     let prev_mode = editor.state.mode;

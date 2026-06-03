@@ -11,7 +11,11 @@ use crossterm::event::{KeyCode, KeyModifiers};
 pub use emacs::EmacsKeymap;
 pub use vim::VimKeymap;
 
-pub trait KeymapHandler: Send + Sync {
+/// Single-threaded TUI key dispatcher.
+///
+/// NOT Send/Sync by design: keymap handlers use interior mutability patterns
+/// (`Rc<RefCell<...>>`) and are bound to the main event loop.
+pub trait KeymapHandler {
     fn handle_key<'a>(
         &'a mut self,
         editor: &'a mut Editor,
