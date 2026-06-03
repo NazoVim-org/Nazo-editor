@@ -26,7 +26,13 @@
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
 
-            nativeBuildInputs = [ pkgs.pkg-config ];
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+              libclang
+              llvm
+            ];
+
+            LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
 
             meta = {
               description = "A minimal Vim-like TUI editor written in Rust";
@@ -48,6 +54,8 @@
               clippy
               cargo-audit
             ];
+
+            LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
 
             RUST_BACKTRACE = "1";
 
