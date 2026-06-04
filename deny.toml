@@ -21,9 +21,16 @@ allow = [
     "Unlicense",
     "Zlib",
     "0BSD",
+    "BSL-1.0",
 ]
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
 highlight = "all"
+skip = [
+    # shlex 1.3.0 is used by bindgen (build-time only), shlex 2.x by cc et al.
+    { crate = "shlex@1.3.0", reason = "build-time dep of bindgen/libquickjs-ng-sys" },
+    # windows-sys 0.60.2 is used by arboard on Windows; 0.61.x by clap/crossterm.
+    { crate = "windows-sys@0.60.2", reason = "used by arboard on Windows targets" },
+]
