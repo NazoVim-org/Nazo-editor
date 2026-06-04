@@ -142,8 +142,7 @@ impl Editor {
     pub fn handle_quit(&mut self) {
         if self.buffer.dirty {
             self.state.set_confirmation(
-                "No write since last change. Quit anyway? (y/n Enter/Esc: yes, n: no)"
-                    .to_string(),
+                "No write since last change. Quit anyway? (y/n Enter/Esc: yes, n: no)".to_string(),
                 ConfirmAction::Quit,
             );
             self.needs_render = true;
@@ -217,7 +216,8 @@ impl Editor {
                 self.state.show_line_numbers = !self.state.show_line_numbers;
             }
             _ => {
-                self.state.set_message(format!("Unknown set option: {}", args));
+                self.state
+                    .set_message(format!("Unknown set option: {}", args));
             }
         }
     }
@@ -229,7 +229,8 @@ impl Editor {
                     self.buffer = buf;
                 }
                 Err(e) => {
-                    self.state.set_message(format!("Failed to reload file: {}", e));
+                    self.state
+                        .set_message(format!("Failed to reload file: {}", e));
                 }
             }
         }

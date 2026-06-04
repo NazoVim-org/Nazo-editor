@@ -11,11 +11,11 @@ pub(crate) mod visual;
 use crate::buffer::TextBuffer;
 use crate::config::Config;
 use crate::highlight::Highlighter;
+use crate::keymap::{create_keymap, KeymapHandler};
 use crate::plugin::PluginManager;
 use crate::register::Register;
 use crate::renderer::Renderer;
 use crate::terminal::Terminal;
-use crate::keymap::{create_keymap, KeymapHandler};
 use crate::types::{
     CommandState, EditorState, Keymap, Mode, PluginEvent, Position, SearchDirection, SearchResult,
 };
@@ -448,8 +448,10 @@ impl Editor {
             .as_ref()
             .map(|p| p.to_str().unwrap_or(""))
             .unwrap_or("[No Name]");
-        self.state
-            .set_message(format!("\"{}\" {} lines, {} characters", path, line_count, total));
+        self.state.set_message(format!(
+            "\"{}\" {} lines, {} characters",
+            path, line_count, total
+        ));
     }
 
     pub async fn save_file_async(&mut self) {

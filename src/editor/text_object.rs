@@ -96,9 +96,7 @@ impl Editor {
                         let line_chars: Vec<char> = line.chars().collect();
                         let mut aw_start = start;
                         while aw_start > 0 {
-                            if line_chars[aw_start - 1] == ' '
-                                || line_chars[aw_start - 1] == '\t'
-                            {
+                            if line_chars[aw_start - 1] == ' ' || line_chars[aw_start - 1] == '\t' {
                                 aw_start -= 1;
                             } else {
                                 break;
@@ -210,13 +208,7 @@ impl Editor {
         }
     }
 
-    fn handle_bracket_text_object(
-        &mut self,
-        register: char,
-        open: char,
-        close: char,
-        inner: bool,
-    ) {
+    fn handle_bracket_text_object(&mut self, register: char, open: char, close: char, inner: bool) {
         let col = self.state.cursor.col;
 
         let mut open_pos: Option<usize> = None;
@@ -274,20 +266,17 @@ impl Editor {
 
                 let mut content = String::new();
                 if open_line == close_line {
-                    let line_chars: Vec<char> =
-                        self.buffer.get_line(open_line).chars().collect();
+                    let line_chars: Vec<char> = self.buffer.get_line(open_line).chars().collect();
                     content = line_chars[content_start..content_end].iter().collect();
                 } else {
-                    let open_chars: Vec<char> =
-                        self.buffer.get_line(open_line).chars().collect();
+                    let open_chars: Vec<char> = self.buffer.get_line(open_line).chars().collect();
                     content.push_str(&open_chars[content_start..].iter().collect::<String>());
                     content.push('\n');
                     for l in (open_line + 1)..close_line {
                         content.push_str(&self.buffer.get_line(l));
                         content.push('\n');
                     }
-                    let close_chars: Vec<char> =
-                        self.buffer.get_line(close_line).chars().collect();
+                    let close_chars: Vec<char> = self.buffer.get_line(close_line).chars().collect();
                     content.push_str(&close_chars[..content_end].iter().collect::<String>());
                 }
 

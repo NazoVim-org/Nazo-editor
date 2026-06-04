@@ -10,10 +10,11 @@ impl Editor {
                 self.state.mode = Mode::Normal;
                 self.state.visual_start = None;
                 self.state.visual_type = None;
-                self.plugin_manager.emit(crate::types::PluginEvent::ModeChange {
-                    from: prev_mode,
-                    to: Mode::Normal,
-                });
+                self.plugin_manager
+                    .emit(crate::types::PluginEvent::ModeChange {
+                        from: prev_mode,
+                        to: Mode::Normal,
+                    });
                 self.needs_render = true;
             }
             KeyCode::Char('y') => {
@@ -22,10 +23,11 @@ impl Editor {
                 self.state.mode = Mode::Normal;
                 self.state.visual_start = None;
                 self.state.visual_type = None;
-                self.plugin_manager.emit(crate::types::PluginEvent::ModeChange {
-                    from: prev_mode,
-                    to: Mode::Normal,
-                });
+                self.plugin_manager
+                    .emit(crate::types::PluginEvent::ModeChange {
+                        from: prev_mode,
+                        to: Mode::Normal,
+                    });
                 self.needs_render = true;
             }
             KeyCode::Char('d') => {
@@ -34,10 +36,11 @@ impl Editor {
                 self.state.mode = Mode::Normal;
                 self.state.visual_start = None;
                 self.state.visual_type = None;
-                self.plugin_manager.emit(crate::types::PluginEvent::ModeChange {
-                    from: prev_mode,
-                    to: Mode::Normal,
-                });
+                self.plugin_manager
+                    .emit(crate::types::PluginEvent::ModeChange {
+                        from: prev_mode,
+                        to: Mode::Normal,
+                    });
                 self.needs_render = true;
             }
             KeyCode::Char('c') => {
@@ -46,10 +49,11 @@ impl Editor {
                 self.state.mode = Mode::Insert;
                 self.state.visual_start = None;
                 self.state.visual_type = None;
-                self.plugin_manager.emit(crate::types::PluginEvent::ModeChange {
-                    from: prev_mode,
-                    to: Mode::Insert,
-                });
+                self.plugin_manager
+                    .emit(crate::types::PluginEvent::ModeChange {
+                        from: prev_mode,
+                        to: Mode::Insert,
+                    });
                 self.needs_render = true;
             }
             KeyCode::Char('h') => {
@@ -106,10 +110,11 @@ impl Editor {
                 self.state.visual_type = None;
                 let prev_mode = self.state.mode;
                 self.state.mode = Mode::Insert;
-                self.plugin_manager.emit(crate::types::PluginEvent::ModeChange {
-                    from: prev_mode,
-                    to: Mode::Insert,
-                });
+                self.plugin_manager
+                    .emit(crate::types::PluginEvent::ModeChange {
+                        from: prev_mode,
+                        to: Mode::Insert,
+                    });
                 self.needs_render = true;
             }
             KeyCode::Char('A') if self.state.visual_type == Some(VisualType::Block) => {
@@ -124,10 +129,11 @@ impl Editor {
                 self.state.visual_type = None;
                 let prev_mode = self.state.mode;
                 self.state.mode = Mode::Insert;
-                self.plugin_manager.emit(crate::types::PluginEvent::ModeChange {
-                    from: prev_mode,
-                    to: Mode::Insert,
-                });
+                self.plugin_manager
+                    .emit(crate::types::PluginEvent::ModeChange {
+                        from: prev_mode,
+                        to: Mode::Insert,
+                    });
                 self.needs_render = true;
             }
             _ => {}

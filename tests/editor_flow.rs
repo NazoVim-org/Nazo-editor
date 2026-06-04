@@ -791,7 +791,10 @@ async fn switch_keymap_resets_pending_state() {
     // Switch keymap mid-command — should reset pending count
     ed.switch_keymap("emacs");
     assert!(ed.pending_count.is_none(), "pending_count cleared");
-    assert!(matches!(ed.command_state, CommandState::Idle), "command_state reset");
+    assert!(
+        matches!(ed.command_state, CommandState::Idle),
+        "command_state reset"
+    );
     assert_eq!(ed.state.mode, Mode::Normal);
 }
 

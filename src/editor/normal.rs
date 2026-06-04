@@ -1,4 +1,4 @@
-use crate::editor::{Editor, DotAction};
+use crate::editor::{DotAction, Editor};
 use crate::types::{CommandState, Mode, Operator, PluginEvent, VisualType};
 use crate::undo::{Edit, EditType};
 use crossterm::event::KeyCode;
@@ -23,7 +23,11 @@ impl Editor {
         // Single `replace` to avoid consuming operator state on text-object mismatch.
         let state = std::mem::replace(&mut self.command_state, CommandState::Idle);
         match state {
-            CommandState::AwaitingTextObject { op, register, inner } => {
+            CommandState::AwaitingTextObject {
+                op,
+                register,
+                inner,
+            } => {
                 match op {
                     Operator::Yank | Operator::Delete => {
                         self.handle_text_object(key, register, inner).await;
@@ -739,8 +743,6 @@ impl Editor {
             }
         }
     }
-
-
 
     fn yank_line(&mut self, register: char) {
         let line = self.state.cursor.line;

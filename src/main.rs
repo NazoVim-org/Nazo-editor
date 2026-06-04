@@ -54,11 +54,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let (cli_keymap, file) = resolve_cli(cli);
     // CLI keymap takes priority over config keymap
-    let keymap = cli_keymap.unwrap_or_else(|| {
-        match cfg.keymap.as_str() {
-            "emacs" => Keymap::Emacs,
-            _ => Keymap::Vim,
-        }
+    let keymap = cli_keymap.unwrap_or_else(|| match cfg.keymap.as_str() {
+        "emacs" => Keymap::Emacs,
+        _ => Keymap::Vim,
     });
 
     let mut editor = Editor::new(file.as_deref(), keymap, cfg).await?;
