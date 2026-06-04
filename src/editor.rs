@@ -1618,26 +1618,40 @@ impl Editor {
             }
             KeyCode::Char('I') if self.state.visual_type == Some(VisualType::Block) => {
                 // I in block mode: insert at block start (left column)
-                let s_col = self.state.visual_start.map(|s| s.col).unwrap_or(0)
+                let s_col = self
+                    .state
+                    .visual_start
+                    .map(|s| s.col)
+                    .unwrap_or(0)
                     .min(self.state.cursor.col);
                 self.state.cursor.col = s_col;
                 self.state.visual_start = None;
                 self.state.visual_type = None;
                 let prev_mode = self.state.mode;
                 self.state.mode = Mode::Insert;
-                self.plugin_manager.emit(PluginEvent::ModeChange { from: prev_mode, to: Mode::Insert });
+                self.plugin_manager.emit(PluginEvent::ModeChange {
+                    from: prev_mode,
+                    to: Mode::Insert,
+                });
                 self.needs_render = true;
             }
             KeyCode::Char('A') if self.state.visual_type == Some(VisualType::Block) => {
                 // A in block mode: append after block end (right column)
-                let e_col = self.state.visual_start.map(|s| s.col).unwrap_or(0)
+                let e_col = self
+                    .state
+                    .visual_start
+                    .map(|s| s.col)
+                    .unwrap_or(0)
                     .max(self.state.cursor.col);
                 self.state.cursor.col = e_col;
                 self.state.visual_start = None;
                 self.state.visual_type = None;
                 let prev_mode = self.state.mode;
                 self.state.mode = Mode::Insert;
-                self.plugin_manager.emit(PluginEvent::ModeChange { from: prev_mode, to: Mode::Insert });
+                self.plugin_manager.emit(PluginEvent::ModeChange {
+                    from: prev_mode,
+                    to: Mode::Insert,
+                });
                 self.needs_render = true;
             }
             _ => {}
@@ -1657,12 +1671,12 @@ impl Editor {
                         self.normalize_line_selection(start.line, self.state.cursor.line);
                     self.buffer.get_line_range(s_line, e_line)
                 }
-                VisualType::Block => {
-                    self.buffer.get_block_range(
-                        start.line, start.col,
-                        self.state.cursor.line, self.state.cursor.col,
-                    )
-                }
+                VisualType::Block => self.buffer.get_block_range(
+                    start.line,
+                    start.col,
+                    self.state.cursor.line,
+                    self.state.cursor.col,
+                ),
             };
             self.register.set('"', &content);
         }
@@ -2825,7 +2839,8 @@ impl Editor {
                 // Insert swapped: c2 then c1
                 self.buffer.insert_char(line, col - 1, c2);
                 self.buffer.insert_char(line, col, c1);
-                self.state.cursor.col = (col + 1).min(self.buffer.get_line(line).len().saturating_sub(1));
+                self.state.cursor.col =
+                    (col + 1).min(self.buffer.get_line(line).len().saturating_sub(1));
                 self.state.dirty = true;
                 self.needs_render = true;
             }

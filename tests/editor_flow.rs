@@ -633,8 +633,8 @@ async fn emacs_ctrl_t_transpose_chars() {
     let mut ed = Editor::new_headless_for_test(Keymap::Emacs).expect("headless");
     ed.set_buffer_for_test("hello\n");
     ed.state.cursor.col = 2; // at 'e' and 'l' (col 2 → between 'e' and 'l')
-    // Actually transpose swaps chars before and at cursor
-    // Cursor at col 1: swaps 'h'(0) and 'e'(1)
+                             // Actually transpose swaps chars before and at cursor
+                             // Cursor at col 1: swaps 'h'(0) and 'e'(1)
     ed.state.cursor.col = 1;
     ed.handle_key_for_test(KeyCode::Char('t'), KeyModifiers::CONTROL)
         .await;
@@ -653,7 +653,10 @@ async fn emacs_ctrl_g_aborts_command_mode() {
     ed.handle_key_for_test(KeyCode::Char('g'), KeyModifiers::CONTROL)
         .await;
     assert_eq!(ed.state.mode, Mode::Normal);
-    assert!(ed.state.command_buffer.is_empty(), "C-g cleared command buffer");
+    assert!(
+        ed.state.command_buffer.is_empty(),
+        "C-g cleared command buffer"
+    );
 }
 
 // ── Emacs C-x u redo ───────────────────────────────────────
@@ -762,7 +765,10 @@ async fn switch_from_vim_to_emacs_and_back() {
     ed.handle_key_for_test(KeyCode::Char('f'), KeyModifiers::ALT)
         .await;
     let col_after = ed.state.cursor.col;
-    assert!(col_after > col_before, "M-f moved cursor forward after emacs switch");
+    assert!(
+        col_after > col_before,
+        "M-f moved cursor forward after emacs switch"
+    );
     let (buf, _, _, _) = ed.snapshot_for_test();
     assert_eq!(buf, "hello world\n", "buffer unchanged after M-f");
 
@@ -806,7 +812,10 @@ async fn switch_keymap_via_command_mode() {
     let col_before = ed.state.cursor.col;
     ed.handle_key_for_test(KeyCode::Char('f'), KeyModifiers::ALT)
         .await;
-    assert!(ed.state.cursor.col > col_before, "M-f works after :keymap emacs");
+    assert!(
+        ed.state.cursor.col > col_before,
+        "M-f works after :keymap emacs"
+    );
 }
 
 #[tokio::test]

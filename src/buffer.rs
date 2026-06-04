@@ -442,7 +442,7 @@ impl TextBuffer {
 
         let mut result = String::new();
         // Delete from bottom line to top to avoid index shifting
-        // But since we're deleting within lines (not full lines), 
+        // But since we're deleting within lines (not full lines),
         // we can process top-to-bottom safely because each line's
         // deletion is at the same col range within its own line.
         for line_num in s_line..=e_line {
