@@ -21,7 +21,11 @@ allow = [
     "Unlicense",
     "Zlib",
     "0BSD",
-    "BSL-1.0",
+]
+# BSL-1.0 is used only by clipboard-win and error-code (Windows deps of arboard).
+exceptions = [
+    { crate = "clipboard-win", allow = ["BSL-1.0"] },
+    { crate = "error-code", allow = ["BSL-1.0"] },
 ]
 
 [bans]
