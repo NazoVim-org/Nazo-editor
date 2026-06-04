@@ -4,17 +4,12 @@
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# vulnerability is implied (all vulnerabilities emit errors)
 unmaintained = "workspace"
 unsound = "workspace"
 yanked = "warn"
 ignore = []
 
 [licenses]
-unlicensed = "deny"
-allow-osi-fsf-free = "neither"
-copyleft = "warn"
-default = "deny"
 allow = [
     "MIT",
     "Apache-2.0",
