@@ -382,6 +382,92 @@ impl TextBuffer {
 
         results
     }
+
+    /// Get the text content of a rectangular (visual block) region.
+    /// The rectangle spans lines [start_line, end_line] and columns [start_col, end_col].
+    /// Returns each line segment joined by newline.
+    pub fn get_block_range(
+        &self,
+        start_line: usize,
+        start_col: usize,
+        end_line: usize,
+        end_col: usize,
+    ) -> String {
+        let (s_line, e_line) = if start_line <= end_line {
+            (start_line, end_line)
+        } else {
+            (end_line, start_line)
+        };
+        let (s_col, e_col) = if start_col <= end_col {
+            (start_col, end_col)
+        } else {
+            (end_col, start_col)
+        };
+
+        let mut result = String::new();
+        for line_num in s_line..=e_line {
+            let line = self.get_line(line_num);
+            let chars: Vec<char> = line.chars().collect();
+            let end = e_col.min(chars.len());
+            if s_col < end {
+                result.push_str(&chars[s_col..end].iter().collect::<String>());
+            }
+            if line_num < e_line {
+                result.push('\n');
+            }
+        }
+        result
+    }
+
+    /// Delete a rectangular (visual block) region.
+    /// Each line has the range [col_start, col_end) removed.
+    /// Returns the deleted content (same format as `get_block_range`).
+    pub fn delete_block_range(
+        &mut self,
+        start_line: usize,
+        start_col: usize,
+        end_line: usize,
+        end_col: usize,
+    ) -> String {
+        let (s_line, e_line) = if start_line <= end_line {
+            (start_line, end_line)
+        } else {
+            (end_line, start_line)
+        };
+        let (s_col, e_col) = if start_col <= end_col {
+            (start_col, end_col)
+        } else {
+            (end_col, start_col)
+        };
+
+        let mut result = String::new();
+        // Delete from bottom line to top to avoid index shifting
+        // But since we're deleting within lines (not full lines),
+        // we can process top-to-bottom safely because each line's
+        // deletion is at the same col range within its own line.
+        for line_num in s_line..=e_line {
+            let line = self.get_line(line_num);
+            let chars: Vec<char> = line.chars().collect();
+            let end = e_col.min(chars.len());
+            if s_col < end {
+                let line_content: String = chars[s_col..end].iter().collect();
+                result.push_str(&line_content);
+                if line_num < e_line {
+                    result.push('\n');
+                }
+                // Delete the range for this line
+                let line_idx = line_num.saturating_sub(1);
+                let char_start = self.doc.line_to_char(line_idx) + s_col;
+                let char_end = self.doc.line_to_char(line_idx) + end;
+                if char_start < char_end && char_end <= self.doc.len_chars() {
+                    self.doc.remove(char_start..char_end);
+                    self.dirty = true;
+                    self.modification_count += 1;
+                }
+            }
+        }
+        result
+    }
 }
 
 impl Default for TextBuffer {

@@ -70,6 +70,21 @@ impl KeymapHandler for VimKeymap {
                             editor.needs_render = true;
                             return;
                         }
+                        KeyCode::Char('v') => {
+                            // Ctrl-v: enter visual block mode
+                            let prev_mode = editor.state.mode;
+                            editor.state.mode = Mode::Visual;
+                            editor.state.visual_start = Some(editor.state.cursor);
+                            editor.state.visual_type = Some(crate::types::VisualType::Block);
+                            editor
+                                .plugin_manager
+                                .emit(crate::types::PluginEvent::ModeChange {
+                                    from: prev_mode,
+                                    to: Mode::Visual,
+                                });
+                            editor.needs_render = true;
+                            return;
+                        }
                         _ => {}
                     },
                     _ => {}

@@ -138,6 +138,18 @@ impl KeymapHandler for EmacsKeymap {
                     });
                     editor.needs_render = true;
                 }
+                (true, KeyCode::Char('r')) => {
+                    // C-r: backward search (enter command mode with ?)
+                    let prev_mode = editor.state.mode;
+                    editor.state.mode = Mode::Command;
+                    editor.state.command_buffer.clear();
+                    editor.state.command_buffer.push('?');
+                    editor.plugin_manager.emit(PluginEvent::ModeChange {
+                        from: prev_mode,
+                        to: Mode::Command,
+                    });
+                    editor.needs_render = true;
+                }
                 (true, KeyCode::Char('t')) => {
                     editor.transpose_chars();
                 }
@@ -162,7 +174,7 @@ impl KeymapHandler for EmacsKeymap {
                 (true, KeyCode::Char('?')) => {
                     editor.undo();
                 }
-                (false, KeyCode::Char(c)) if !c.is_control() => {
+                (false, KeyCode::Char(c)) if !c.is_control() && !has_alt => {
                     editor.insert_char(c);
                 }
                 (false, KeyCode::Backspace) => {
@@ -219,6 +231,11 @@ impl KeymapHandler for EmacsKeymap {
                             }
                             KeyCode::Char('w') if editor.has_active_region() => {
                                 editor.copy_region();
+                            }
+                            KeyCode::Char('y') => {
+                                // M-y: yank-pop (cycle kill-ring)
+                                editor.yank_pop();
+                                editor.needs_render = true;
                             }
                             _ => {}
                         }
