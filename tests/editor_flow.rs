@@ -2,12 +2,6 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use ijevim::editor::Editor;
 use ijevim::types::{Keymap, Mode, VisualType};
 
-fn test_emacs_editor(text: &str) -> Editor {
-    let mut editor = Editor::new_headless_for_test(Keymap::Emacs).expect("headless editor");
-    editor.set_buffer_for_test(text);
-    editor
-}
-
 fn test_vim_editor(text: &str) -> Editor {
     let mut editor = Editor::new_headless_for_test(Keymap::Vim).expect("headless editor");
     editor.set_buffer_for_test(text);
