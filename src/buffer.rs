@@ -516,7 +516,7 @@ mod tests {
     #[test]
     fn test_save_resets_dirty() {
         let mut buf = TextBuffer::with_text("test\n");
-        buf.file_path = Some(std::path::PathBuf::from("/tmp/test_ijevim.txt"));
+        buf.file_path = Some(std::env::temp_dir().join("test_ijevim.txt"));
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             buf.save_file().await.expect("Save failed");

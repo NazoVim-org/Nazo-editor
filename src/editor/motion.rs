@@ -1,0 +1,283 @@
+use crate::editor::Editor;
+
+impl Editor {
+    pub(crate) fn page_down(&mut self) {
+        let terminal_rows = self.terminal.rows() as usize;
+        let line_count = self.buffer.line_count();
+        self.state.cursor.line = (self.state.cursor.line + terminal_rows)
+            .min(line_count)
+            .max(1);
+        let len = self.buffer.get_line(self.state.cursor.line).len();
+        self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
+    }
+
+    pub(crate) fn page_up(&mut self) {
+        let terminal_rows = self.terminal.rows() as usize;
+        self.state.cursor.line = self.state.cursor.line.saturating_sub(terminal_rows).max(1);
+        let len = self.buffer.get_line(self.state.cursor.line).len();
+        self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
+    }
+
+    pub(crate) fn scroll_by(&mut self, lines: usize, forward: bool) {
+        let line_count = self.buffer.line_count();
+        if forward {
+            self.state.cursor.line = (self.state.cursor.line + lines).min(line_count).max(1);
+        } else {
+            self.state.cursor.line = self.state.cursor.line.saturating_sub(lines).max(1);
+        }
+    }
+
+    pub fn scroll_up(&mut self) {
+        let rows = self.terminal.rows() as usize;
+        self.scroll_by(rows, false);
+        self.needs_render = true;
+    }
+
+    pub fn scroll_down(&mut self) {
+        let rows = self.terminal.rows() as usize;
+        self.scroll_by(rows, true);
+        self.needs_render = true;
+    }
+
+    pub fn scroll_up_one(&mut self) {
+        if self.state.cursor.line > 1 {
+            self.state.cursor.line -= 1;
+        }
+    }
+
+    pub fn scroll_down_one(&mut self) {
+        let line_count = self.buffer.line_count();
+        if self.state.cursor.line < line_count {
+            self.state.cursor.line += 1;
+        }
+    }
+
+    pub fn scroll_cursor_to_center(&mut self) {
+        let terminal_rows = self.terminal.rows() as usize;
+        let visible_rows = terminal_rows.saturating_sub(2);
+        let scroll_pos = self.state.cursor.line.saturating_sub(visible_rows / 2);
+        self.state.cursor.line = scroll_pos.max(1);
+    }
+
+    pub fn scroll_cursor_to_top(&mut self) {
+        self.state.cursor.line = 1;
+    }
+
+    pub fn scroll_cursor_to_bottom(&mut self) {
+        let terminal_rows = self.terminal.rows() as usize;
+        let visible_rows = terminal_rows.saturating_sub(2);
+        let line_count = self.buffer.line_count();
+        self.state.cursor.line = (line_count.saturating_sub(visible_rows) + 1).max(1);
+    }
+
+    pub(crate) fn cursor_right(&mut self, n: usize) {
+        let line_len = self.buffer.get_line(self.state.cursor.line).len();
+        self.state.cursor.col = (self.state.cursor.col + n).min(line_len.saturating_sub(1));
+        self.needs_render = true;
+    }
+
+    pub(crate) fn cursor_left(&mut self, n: usize) {
+        self.state.cursor.col = self.state.cursor.col.saturating_sub(n);
+        self.needs_render = true;
+    }
+
+    pub(crate) fn cursor_down(&mut self, n: usize) {
+        let line_count = self.buffer.line_count();
+        self.state.cursor.line = (self.state.cursor.line + n).min(line_count);
+        let len = self.buffer.get_line(self.state.cursor.line).len();
+        self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
+        self.needs_render = true;
+    }
+
+    pub(crate) fn cursor_up(&mut self, n: usize) {
+        self.state.cursor.line = self.state.cursor.line.saturating_sub(n).max(1);
+        let len = self.buffer.get_line(self.state.cursor.line).len();
+        self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
+        self.needs_render = true;
+    }
+
+    pub(crate) fn cursor_line_start(&mut self) {
+        self.state.cursor.col = 0;
+        self.needs_render = true;
+    }
+
+    pub(crate) fn cursor_line_end(&mut self) {
+        let line = self.buffer.get_line(self.state.cursor.line);
+        self.state.cursor.col = line.len().saturating_sub(1);
+        self.needs_render = true;
+    }
+
+    pub(crate) fn move_word_forward(&mut self) {
+        let line = self.state.cursor.line;
+        let col = self.state.cursor.col;
+        let line_str = self.buffer.get_line(line);
+        let chars: Vec<char> = line_str.chars().collect();
+
+        let mut i = col;
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+        while i < chars.len() && !chars[i].is_whitespace() {
+            i += 1;
+        }
+
+        if i < chars.len() {
+            self.state.cursor.col = i;
+        }
+    }
+
+    pub(crate) fn move_word_backward(&mut self) {
+        let line = self.state.cursor.line;
+        let col = self.state.cursor.col;
+        let line_str = self.buffer.get_line(line);
+        let chars: Vec<char> = line_str.chars().collect();
+
+        if col == 0 {
+            return;
+        }
+
+        let mut i = col - 1;
+        while i > 0 && chars[i].is_whitespace() {
+            i -= 1;
+        }
+        while i > 0 && !chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+
+        self.state.cursor.col = i;
+    }
+
+    pub(crate) fn move_word_end(&mut self) {
+        let line = self.state.cursor.line;
+        let col = self.state.cursor.col;
+        let line_str = self.buffer.get_line(line);
+        let chars: Vec<char> = line_str.chars().collect();
+
+        let mut i = col;
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+
+        while i < chars.len() && !chars[i].is_whitespace() {
+            i += 1;
+        }
+
+        if i > 0 && i <= chars.len() {
+            self.state.cursor.col = i - 1;
+        }
+    }
+
+    pub(crate) fn find_char(&mut self, ch: char, till: bool, forward: bool) -> bool {
+        let line = self.buffer.get_line(self.state.cursor.line);
+        let chars: Vec<char> = line.chars().collect();
+        let start_col = self.state.cursor.col;
+
+        if forward {
+            for (i, &c) in chars.iter().enumerate().skip(start_col + 1) {
+                if c == ch {
+                    if till {
+                        self.state.cursor.col = i.saturating_sub(1);
+                    } else {
+                        self.state.cursor.col = i;
+                    }
+                    return true;
+                }
+            }
+        } else {
+            for i in (0..start_col).rev() {
+                if chars[i] == ch {
+                    if till {
+                        self.state.cursor.col = (i + 1).min(chars.len().saturating_sub(1));
+                    } else {
+                        self.state.cursor.col = i;
+                    }
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub(crate) fn repeat_find(&mut self, forward: bool) -> bool {
+        if let Some(ch) = self.last_fchar {
+            let till = self.last_fchar_till;
+            self.find_char(ch, till, forward)
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn jump_to_matching_bracket(&mut self) {
+        let line = self.state.cursor.line;
+        let col = self.state.cursor.col;
+        let line_chars: Vec<char> = self.buffer.get_line(line).chars().collect();
+
+        if col >= line_chars.len() {
+            return;
+        }
+
+        let ch = line_chars[col];
+
+        let matching = match ch {
+            '(' => ')',
+            ')' => '(',
+            '[' => ']',
+            ']' => '[',
+            '{' => '}',
+            '}' => '{',
+            _ => return,
+        };
+
+        let direction: i32 = match ch {
+            '(' | '[' | '{' => 1,
+            ')' | ']' | '}' => -1,
+            _ => return,
+        };
+
+        let mut count = 1;
+        let mut current_line = line;
+        let mut current_col = col;
+
+        loop {
+            if direction > 0 {
+                current_col += 1;
+                if current_col >= self.buffer.get_line(current_line).len() {
+                    current_line += 1;
+                    if current_line > self.buffer.line_count() {
+                        break;
+                    }
+                    current_col = 0;
+                }
+            } else {
+                if current_col == 0 {
+                    if current_line == 1 {
+                        break;
+                    }
+                    current_line -= 1;
+                    current_col = self.buffer.get_line(current_line).len().saturating_sub(1);
+                } else {
+                    current_col -= 1;
+                }
+            }
+
+            let cur_chars: Vec<char> = self.buffer.get_line(current_line).chars().collect();
+            if current_col < cur_chars.len() {
+                let c = cur_chars[current_col];
+                if c == ch {
+                    count += 1;
+                } else if c == matching {
+                    count -= 1;
+                    if count == 0 {
+                        self.state.cursor.line = current_line;
+                        self.state.cursor.col = current_col;
+                        return;
+                    }
+                }
+            }
+
+            if current_line > self.buffer.line_count() || current_line < 1 {
+                break;
+            }
+        }
+    }
+}

@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use ijevim::config::Config;
 use ijevim::editor::Editor;
 use ijevim::types::Keymap;
 
@@ -29,17 +30,19 @@ enum ModeCommand {
     },
 }
 
-fn resolve_cli(cli: Cli) -> (Keymap, Option<String>) {
+/// Returns `(Some(keymap), file)` when a mode subcommand is given,
+/// or `(None, file)` when no mode is specified (config decides the default).
+fn resolve_cli(cli: Cli) -> (Option<Keymap>, Option<String>) {
     match cli.mode {
-        Some(ModeCommand::Vim { file }) => (Keymap::Vim, file.or(cli.file)),
-        Some(ModeCommand::Emacs { file }) => (Keymap::Emacs, file.or(cli.file)),
-        None => (Keymap::Vim, cli.file),
+        Some(ModeCommand::Vim { file }) => (Some(Keymap::Vim), file.or(cli.file)),
+        Some(ModeCommand::Emacs { file }) => (Some(Keymap::Emacs), file.or(cli.file)),
+        None => (None, cli.file),
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _ = tracing_subscriber::fmt().try_init();
+    // Runtime initialised by #[tokio::main]
 
     // Set panic hook to restore terminal state
     std::panic::set_hook(Box::new(|_| {
@@ -47,10 +50,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
     }));
 
+    let cfg = Config::load();
     let cli = Cli::parse();
-    let (keymap, file) = resolve_cli(cli);
+    let (cli_keymap, file) = resolve_cli(cli);
+    // CLI keymap takes priority over config keymap
+    let keymap = cli_keymap.unwrap_or(match cfg.keymap.as_str() {
+        "emacs" => Keymap::Emacs,
+        _ => Keymap::Vim,
+    });
 
-    let mut editor = Editor::new(file.as_deref(), keymap).await?;
+    let mut editor = Editor::new(file.as_deref(), keymap, cfg).await?;
     editor.run().await?;
 
     Ok(())
@@ -64,7 +73,7 @@ mod tests {
     fn parses_vim_subcommand_without_file() {
         let cli = Cli::try_parse_from(["ivim", "vim"]).expect("vim subcommand should parse");
         let (keymap, file) = resolve_cli(cli);
-        assert_eq!(keymap, Keymap::Vim);
+        assert_eq!(keymap, Some(Keymap::Vim));
         assert_eq!(file, None);
     }
 
@@ -72,7 +81,7 @@ mod tests {
     fn parses_emacs_subcommand_without_file() {
         let cli = Cli::try_parse_from(["ivim", "emacs"]).expect("emacs subcommand should parse");
         let (keymap, file) = resolve_cli(cli);
-        assert_eq!(keymap, Keymap::Emacs);
+        assert_eq!(keymap, Some(Keymap::Emacs));
         assert_eq!(file, None);
     }
 
@@ -81,7 +90,7 @@ mod tests {
         let cli = Cli::try_parse_from(["ivim", "vim", "sample.txt"])
             .expect("vim subcommand with file should parse");
         let (keymap, file) = resolve_cli(cli);
-        assert_eq!(keymap, Keymap::Vim);
+        assert_eq!(keymap, Some(Keymap::Vim));
         assert_eq!(file.as_deref(), Some("sample.txt"));
     }
 
@@ -90,7 +99,7 @@ mod tests {
         let cli = Cli::try_parse_from(["ivim", "emacs", "sample.txt"])
             .expect("emacs subcommand with file should parse");
         let (keymap, file) = resolve_cli(cli);
-        assert_eq!(keymap, Keymap::Emacs);
+        assert_eq!(keymap, Some(Keymap::Emacs));
         assert_eq!(file.as_deref(), Some("sample.txt"));
     }
 
@@ -99,7 +108,7 @@ mod tests {
         let cli = Cli::try_parse_from(["ivim", "sample.txt"])
             .expect("top-level file argument should parse");
         let (keymap, file) = resolve_cli(cli);
-        assert_eq!(keymap, Keymap::Vim);
+        assert_eq!(keymap, None, "no keymap override when no subcommand");
         assert_eq!(file.as_deref(), Some("sample.txt"));
     }
 
@@ -108,7 +117,7 @@ mod tests {
         let cli = Cli::try_parse_from(["ivim", "sample.txt", "emacs"])
             .expect("parent file before mode subcommand should parse");
         let (keymap, file) = resolve_cli(cli);
-        assert_eq!(keymap, Keymap::Emacs);
+        assert_eq!(keymap, Some(Keymap::Emacs));
         assert_eq!(file.as_deref(), Some("sample.txt"));
     }
 
@@ -117,18 +126,16 @@ mod tests {
         let cli = Cli::try_parse_from(["ivim", "parent.txt", "vim", "child.txt"])
             .expect("subcommand file should parse");
         let (keymap, file) = resolve_cli(cli);
-        assert_eq!(keymap, Keymap::Vim);
+        assert_eq!(keymap, Some(Keymap::Vim));
         assert_eq!(file.as_deref(), Some("child.txt"));
     }
 
     #[test]
     fn treats_unknown_subcommand_as_file_argument() {
-        // clap treats unrecognized tokens as positional args (file), not as subcommands.
-        // This is expected: `ivim invalid-mode` opens a file named "invalid-mode".
         let cli = Cli::try_parse_from(["ivim", "invalid-mode"])
             .expect("should parse unknown token as file argument");
         let (keymap, file) = resolve_cli(cli);
-        assert_eq!(keymap, Keymap::Vim);
+        assert_eq!(keymap, None, "no keymap override for unknown subcommand");
         assert_eq!(file.as_deref(), Some("invalid-mode"));
     }
 }

@@ -30,6 +30,44 @@ impl std::fmt::Display for Keymap {
     }
 }
 
+/// Vim operator kind — replaces `char`-based operator dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operator {
+    Delete,
+    Yank,
+    Change,
+    IndentRight,
+    IndentLeft,
+    FindCharForward,
+    FindCharBackward,
+    TillCharForward,
+    TillCharBackward,
+    RecordMacro,
+    Goto,     // 'g' prefix
+    Scroll,   // 'z' prefix
+    SaveQuit, // 'Z' prefix
+}
+
+/// Vim command parser state — single enum replaces multiple `pending_*` fields.
+#[derive(Debug, Clone, Default)]
+pub enum CommandState {
+    /// No pending command.
+    #[default]
+    Idle,
+    /// Operator decided (count stays in `pending_count` for flexibility).
+    /// Waiting for motion/text-object/second key.
+    AwaitingOperator {
+        op: Operator,
+        register: Option<char>,
+    },
+    /// Text object prefix ('i'/'a') decided, waiting for target (w, ", (, etc.).
+    AwaitingTextObject {
+        op: Operator,
+        register: char,
+        inner: bool,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Normal,
@@ -139,6 +177,7 @@ pub struct EditorState {
     pub file_path: Option<PathBuf>,
     pub dirty: bool,
     pub command_buffer: String,
+    pub last_message: Option<String>,
     pub visual_start: Option<Position>,
     pub visual_type: Option<VisualType>,
     pub marks: Marks,
@@ -158,6 +197,7 @@ impl Default for EditorState {
             file_path: None,
             dirty: false,
             command_buffer: String::new(),
+            last_message: None,
             visual_start: None,
             visual_type: None,
             marks: Marks::new(),
@@ -217,5 +257,16 @@ impl EditorState {
 
     pub fn clear_confirmation(&mut self) {
         self.confirmation_prompt = None;
+    }
+
+    /// Set a transient message (error/status) displayed in the status line.
+    /// Shown until the next key press replaces it.
+    pub fn set_message(&mut self, msg: impl Into<String>) {
+        self.last_message = Some(msg.into());
+    }
+
+    /// Clear the transient message.
+    pub fn clear_message(&mut self) {
+        self.last_message = None;
     }
 }
