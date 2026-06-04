@@ -1,0 +1,315 @@
+use crate::editor::Editor;
+use crate::undo::{Edit, EditType};
+use crossterm::event::KeyCode;
+
+impl Editor {
+    pub(crate) fn indent_lines(&mut self, register: char, indent: bool) {
+        let line = self.state.cursor.line;
+        let content = self.buffer.get_line(line);
+        let _ = register;
+
+        if indent {
+            self.buffer.insert(line, 0, "\t");
+        } else if content.starts_with('\t') {
+            self.buffer.delete(line, 0);
+        } else if content.starts_with("  ") {
+            self.buffer.delete(line, 0);
+            self.buffer.delete(line, 0);
+        }
+
+        self.needs_render = true;
+    }
+
+    pub(crate) async fn handle_text_object_change(
+        &mut self,
+        key: KeyCode,
+        register: char,
+        inner: bool,
+    ) {
+        if let KeyCode::Char('w') = key {
+            if inner {
+                let (word, start, _) = self
+                    .buffer
+                    .get_word_range(self.state.cursor.line, self.state.cursor.col);
+                if !word.is_empty() {
+                    let content = self.buffer.get_char_range(
+                        self.state.cursor.line,
+                        start,
+                        self.state.cursor.line,
+                        start + word.len(),
+                    );
+                    self.register.set(register, &content);
+                    let char_start = self.buffer.line_to_char(self.state.cursor.line - 1) + start;
+                    let char_end = char_start + word.len();
+                    self.buffer.remove_range(char_start, char_end);
+                }
+            }
+            let prev_mode = self.state.mode;
+            self.state.mode = crate::types::Mode::Insert;
+            self.plugin_manager
+                .emit(crate::types::PluginEvent::ModeChange {
+                    from: prev_mode,
+                    to: crate::types::Mode::Insert,
+                });
+            self.on_buffer_modified();
+        }
+    }
+
+    #[allow(clippy::single_match)]
+    pub(crate) async fn handle_text_object(&mut self, key: KeyCode, register: char, inner: bool) {
+        match key {
+            KeyCode::Char('w') => {
+                if inner {
+                    let (word, start, _) = self
+                        .buffer
+                        .get_word_range(self.state.cursor.line, self.state.cursor.col);
+                    if !word.is_empty() {
+                        let char_start =
+                            self.buffer.line_to_char(self.state.cursor.line - 1) + start;
+                        let char_end = char_start + word.len();
+                        let content = self.buffer.get_char_range(
+                            self.state.cursor.line,
+                            start,
+                            self.state.cursor.line,
+                            start + word.len(),
+                        );
+                        let mod_count = self.buffer.modification_count();
+                        self.register.set(register, &content);
+                        self.buffer.remove_range(char_start, char_end);
+                        self.undo_manager.push(Edit {
+                            edit_type: EditType::Delete {
+                                line: self.state.cursor.line,
+                                col: start,
+                                text: content,
+                            },
+                            cursor_before: self.state.cursor,
+                            cursor_after: self.state.cursor,
+                            modification_count: mod_count,
+                        });
+                    }
+                } else {
+                    let (word, start, end) = self
+                        .buffer
+                        .get_word_range(self.state.cursor.line, self.state.cursor.col);
+                    if !word.is_empty() {
+                        let line = self.buffer.get_line(self.state.cursor.line);
+                        let line_chars: Vec<char> = line.chars().collect();
+                        let mut aw_start = start;
+                        while aw_start > 0 {
+                            if line_chars[aw_start - 1] == ' '
+                                || line_chars[aw_start - 1] == '\t'
+                            {
+                                aw_start -= 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        let mut aw_end = end;
+                        while aw_end < line_chars.len() {
+                            if line_chars[aw_end] == ' ' || line_chars[aw_end] == '\t' {
+                                aw_end += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        let char_start =
+                            self.buffer.line_to_char(self.state.cursor.line - 1) + aw_start;
+                        let char_end = char_start + (aw_end - aw_start);
+                        let content = self.buffer.get_char_range(
+                            self.state.cursor.line,
+                            aw_start,
+                            self.state.cursor.line,
+                            aw_end,
+                        );
+                        let mod_count = self.buffer.modification_count();
+                        self.register.set(register, &content);
+                        self.buffer.remove_range(char_start, char_end);
+                        self.undo_manager.push(Edit {
+                            edit_type: EditType::Delete {
+                                line: self.state.cursor.line,
+                                col: aw_start,
+                                text: content,
+                            },
+                            cursor_before: self.state.cursor,
+                            cursor_after: self.state.cursor,
+                            modification_count: mod_count,
+                        });
+                    }
+                }
+            }
+            KeyCode::Char('"') | KeyCode::Char('\'') => {
+                if let KeyCode::Char(quote) = key {
+                    self.handle_quote_text_object(register, quote, inner);
+                }
+            }
+            KeyCode::Char('(') | KeyCode::Char(')') | KeyCode::Char('b') => {
+                self.handle_bracket_text_object(register, '(', ')', inner);
+            }
+            KeyCode::Char('[') | KeyCode::Char(']') => {
+                self.handle_bracket_text_object(register, '[', ']', inner);
+            }
+            KeyCode::Char('{') | KeyCode::Char('}') | KeyCode::Char('B') => {
+                self.handle_bracket_text_object(register, '{', '}', inner);
+            }
+            KeyCode::Char('<') | KeyCode::Char('>') => {
+                self.handle_bracket_text_object(register, '<', '>', inner);
+            }
+            _ => {}
+        }
+        self.needs_render = true;
+    }
+
+    fn handle_quote_text_object(&mut self, register: char, quote: char, inner: bool) {
+        let line = self.buffer.get_line(self.state.cursor.line);
+        let chars: Vec<char> = line.chars().collect();
+        let col = self.state.cursor.col;
+
+        let mut open_pos: Option<usize> = None;
+        for i in (0..col).rev() {
+            if chars[i] == quote {
+                open_pos = Some(i);
+                break;
+            }
+        }
+
+        let mut close_pos: Option<usize> = None;
+        for (i, &c) in chars.iter().enumerate().skip(col + 1) {
+            if c == quote {
+                close_pos = Some(i);
+                break;
+            }
+        }
+
+        if let Some(start) = open_pos {
+            if let Some(end) = close_pos {
+                let (content_start, content_end) = if inner {
+                    (start + 1, end)
+                } else {
+                    (start, end + 1)
+                };
+
+                let content: String = chars[content_start..content_end].iter().collect();
+                let char_start =
+                    self.buffer.line_to_char(self.state.cursor.line - 1) + content_start;
+                let char_end = char_start + content.len();
+                let mod_count = self.buffer.modification_count();
+
+                self.register.set(register, &content);
+                self.buffer.remove_range(char_start, char_end);
+                self.undo_manager.push(Edit {
+                    edit_type: EditType::Delete {
+                        line: self.state.cursor.line,
+                        col: content_start,
+                        text: content,
+                    },
+                    cursor_before: self.state.cursor,
+                    cursor_after: self.state.cursor,
+                    modification_count: mod_count,
+                });
+            }
+        }
+    }
+
+    fn handle_bracket_text_object(
+        &mut self,
+        register: char,
+        open: char,
+        close: char,
+        inner: bool,
+    ) {
+        let col = self.state.cursor.col;
+
+        let mut open_pos: Option<usize> = None;
+        let mut open_line = self.state.cursor.line;
+        for l in (1..=self.state.cursor.line).rev() {
+            let l_chars: Vec<char> = self.buffer.get_line(l).chars().collect();
+            for i in (0..l_chars.len()).rev() {
+                if l == self.state.cursor.line && i >= col {
+                    continue;
+                }
+                if l_chars[i] == open {
+                    open_pos = Some(i);
+                    open_line = l;
+                    break;
+                }
+            }
+            if open_pos.is_some() {
+                break;
+            }
+        }
+
+        let mut close_pos: Option<usize> = None;
+        let mut close_line = self.state.cursor.line;
+        for l in self.state.cursor.line..=self.buffer.line_count() {
+            let l_chars: Vec<char> = self.buffer.get_line(l).chars().collect();
+            for (i, &c) in l_chars.iter().enumerate() {
+                if l == self.state.cursor.line && i <= col {
+                    continue;
+                }
+                if c == close {
+                    close_pos = Some(i);
+                    close_line = l;
+                    break;
+                }
+            }
+            if close_pos.is_some() {
+                break;
+            }
+        }
+
+        if let Some(start) = open_pos {
+            if let Some(end) = close_pos {
+                let (content_start, content_end) = if inner {
+                    (start + 1, end)
+                } else {
+                    (start, end + 1)
+                };
+
+                let start_char_idx = self.buffer.line_to_char(open_line - 1) + content_start;
+                let end_char_idx = if close_line == open_line {
+                    start_char_idx + (content_end - content_start)
+                } else {
+                    self.buffer.line_to_char(close_line - 1) + content_end
+                };
+
+                let mut content = String::new();
+                if open_line == close_line {
+                    let line_chars: Vec<char> =
+                        self.buffer.get_line(open_line).chars().collect();
+                    content = line_chars[content_start..content_end].iter().collect();
+                } else {
+                    let open_chars: Vec<char> =
+                        self.buffer.get_line(open_line).chars().collect();
+                    content.push_str(&open_chars[content_start..].iter().collect::<String>());
+                    content.push('\n');
+                    for l in (open_line + 1)..close_line {
+                        content.push_str(&self.buffer.get_line(l));
+                        content.push('\n');
+                    }
+                    let close_chars: Vec<char> =
+                        self.buffer.get_line(close_line).chars().collect();
+                    content.push_str(&close_chars[..content_end].iter().collect::<String>());
+                }
+
+                let mod_count = self.buffer.modification_count();
+                self.register.set(register, &content);
+                self.buffer.remove_range(start_char_idx, end_char_idx);
+
+                // Position cursor at the start of the deleted range
+                self.state.cursor.line = open_line;
+                self.state.cursor.col = content_start;
+
+                self.undo_manager.push(Edit {
+                    edit_type: EditType::Delete {
+                        line: open_line,
+                        col: content_start,
+                        text: content,
+                    },
+                    cursor_before: self.state.cursor,
+                    cursor_after: self.state.cursor,
+                    modification_count: mod_count,
+                });
+            }
+        }
+    }
+}

@@ -173,10 +173,20 @@ impl Renderer {
 
         // ── Status line ──
         let status_row = rows.saturating_sub(1);
-        let status_style = CellStyle {
-            bg: Color::AnsiValue(236),
-            fg: Color::White,
-            ..CellStyle::default()
+        let is_show_message = state.last_message.is_some();
+        let status_style = if is_show_message {
+            CellStyle {
+                bg: Color::Red,
+                fg: Color::White,
+                bold: true,
+                ..CellStyle::default()
+            }
+        } else {
+            CellStyle {
+                bg: Color::AnsiValue(236),
+                fg: Color::White,
+                ..CellStyle::default()
+            }
         };
         self.render_status(status_row, cols, state, status_style);
 
@@ -318,7 +328,9 @@ impl Renderer {
 
     /// Render the status/command/confirmation line.
     fn render_status(&mut self, row: usize, cols: usize, state: &EditorState, style: CellStyle) {
-        let text = if state.has_confirmation() {
+        let text = if let Some(ref msg) = state.last_message {
+            format!(" {} ", msg)
+        } else if state.has_confirmation() {
             state
                 .confirmation_prompt
                 .as_ref()
