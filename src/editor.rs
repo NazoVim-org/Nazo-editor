@@ -1616,33 +1616,29 @@ impl Editor {
                 };
                 self.needs_render = true;
             }
-            KeyCode::Char('I') => {
-                if self.state.visual_type == Some(VisualType::Block) {
-                    // I in block mode: insert at block start (left column)
-                    let s_col = self.state.visual_start.map(|s| s.col).unwrap_or(0)
-                        .min(self.state.cursor.col);
-                    self.state.cursor.col = s_col;
-                    self.state.visual_start = None;
-                    self.state.visual_type = None;
-                    let prev_mode = self.state.mode;
-                    self.state.mode = Mode::Insert;
-                    self.plugin_manager.emit(PluginEvent::ModeChange { from: prev_mode, to: Mode::Insert });
-                    self.needs_render = true;
-                }
+            KeyCode::Char('I') if self.state.visual_type == Some(VisualType::Block) => {
+                // I in block mode: insert at block start (left column)
+                let s_col = self.state.visual_start.map(|s| s.col).unwrap_or(0)
+                    .min(self.state.cursor.col);
+                self.state.cursor.col = s_col;
+                self.state.visual_start = None;
+                self.state.visual_type = None;
+                let prev_mode = self.state.mode;
+                self.state.mode = Mode::Insert;
+                self.plugin_manager.emit(PluginEvent::ModeChange { from: prev_mode, to: Mode::Insert });
+                self.needs_render = true;
             }
-            KeyCode::Char('A') => {
-                if self.state.visual_type == Some(VisualType::Block) {
-                    // A in block mode: append after block end (right column)
-                    let e_col = self.state.visual_start.map(|s| s.col).unwrap_or(0)
-                        .max(self.state.cursor.col);
-                    self.state.cursor.col = e_col;
-                    self.state.visual_start = None;
-                    self.state.visual_type = None;
-                    let prev_mode = self.state.mode;
-                    self.state.mode = Mode::Insert;
-                    self.plugin_manager.emit(PluginEvent::ModeChange { from: prev_mode, to: Mode::Insert });
-                    self.needs_render = true;
-                }
+            KeyCode::Char('A') if self.state.visual_type == Some(VisualType::Block) => {
+                // A in block mode: append after block end (right column)
+                let e_col = self.state.visual_start.map(|s| s.col).unwrap_or(0)
+                    .max(self.state.cursor.col);
+                self.state.cursor.col = e_col;
+                self.state.visual_start = None;
+                self.state.visual_type = None;
+                let prev_mode = self.state.mode;
+                self.state.mode = Mode::Insert;
+                self.plugin_manager.emit(PluginEvent::ModeChange { from: prev_mode, to: Mode::Insert });
+                self.needs_render = true;
             }
             _ => {}
         }
