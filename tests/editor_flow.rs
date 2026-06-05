@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ijevim::editor::Editor;
-use ijevim::types::{CommandState, Keymap, Mode, VisualType};
+use ijevim::types::{Keymap, Mode, PendingOperator, VisualType};
 
 fn test_vim_editor(text: &str) -> Editor {
     let mut editor = Editor::new_headless_for_test(Keymap::Vim).expect("headless editor");
@@ -792,7 +792,7 @@ async fn switch_keymap_resets_pending_state() {
     ed.switch_keymap("emacs");
     assert!(ed.pending_count.is_none(), "pending_count cleared");
     assert!(
-        matches!(ed.command_state, CommandState::Idle),
+        matches!(ed.pending_op, PendingOperator::Idle),
         "command_state reset"
     );
     assert_eq!(ed.state.mode, Mode::Normal);

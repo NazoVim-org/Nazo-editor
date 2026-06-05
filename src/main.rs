@@ -34,7 +34,19 @@ fn print_version() {
     println!("ivim {}", env!("CARGO_PKG_VERSION"));
 }
 
+/// Result of parsing command-line arguments.
+enum CliAction {
+    /// Normal edit invocation.
+    Edit(Cli),
+    /// Print help text and exit.
+    Help,
+    /// Print version and exit.
+    Version,
+}
+
 /// Parse command-line arguments without external dependencies.
+///
+/// `args` should contain the raw program arguments **excluding** argv[0].
 ///
 /// Accepted shapes:
 /// - `ivim`
@@ -46,21 +58,15 @@ fn print_version() {
 ///
 /// Any token that is not a recognised flag or mode is treated as a file path,
 /// matching the pre-refactor `clap` behaviour.
-fn parse_args() -> Result<Cli, String> {
+fn parse_args(args: &[String]) -> CliAction {
     let mut keymap: Option<Keymap> = None;
     let mut file: Option<String> = None;
     let mut mode_taken_file: Option<String> = None;
 
-    for arg in std::env::args().skip(1) {
+    for arg in args {
         match arg.as_str() {
-            "-h" | "--help" => {
-                print_help();
-                std::process::exit(0);
-            }
-            "-v" | "--version" => {
-                print_version();
-                std::process::exit(0);
-            }
+            "-h" | "--help" => return CliAction::Help,
+            "-v" | "--version" => return CliAction::Version,
             "vim" => {
                 keymap = Some(Keymap::Vim);
             }
@@ -71,9 +77,9 @@ fn parse_args() -> Result<Cli, String> {
                 // First non-mode token becomes the parent file, unless a mode
                 // subcommand already supplied its own file.
                 if file.is_none() {
-                    file = Some(arg);
+                    file = Some(arg.clone());
                 } else if keymap.is_some() && mode_taken_file.is_none() {
-                    mode_taken_file = Some(arg);
+                    mode_taken_file = Some(arg.clone());
                 } else {
                     // Extra positional: keep first as the canonical file.
                     eprintln!("{}: ignoring extra argument '{}'", USAGE, arg);
@@ -87,11 +93,7 @@ fn parse_args() -> Result<Cli, String> {
         file = Some(f);
     }
 
-    Ok(Cli { keymap, file })
-}
-
-fn resolve_cli(cli: Cli) -> (Option<Keymap>, Option<String>) {
-    (cli.keymap, cli.file)
+    CliAction::Edit(Cli { keymap, file })
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -107,21 +109,26 @@ async fn main() -> Result<(), IjevimError> {
     }));
 
     let cfg = Config::load();
-    let cli = match parse_args() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{}\nerror: {}", USAGE, e);
-            std::process::exit(2);
+
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let cli = match parse_args(&args) {
+        CliAction::Edit(cli) => cli,
+        CliAction::Help => {
+            print_help();
+            return Ok(());
+        }
+        CliAction::Version => {
+            print_version();
+            return Ok(());
         }
     };
-    let (cli_keymap, file) = resolve_cli(cli);
     // CLI keymap takes priority over config keymap
-    let keymap = cli_keymap.unwrap_or(match cfg.keymap.as_str() {
+    let keymap = cli.keymap.unwrap_or(match cfg.keymap.as_str() {
         "emacs" => Keymap::Emacs,
         _ => Keymap::Vim,
     });
 
-    let mut editor = Editor::new(file.as_deref(), keymap, cfg).await?;
+    let mut editor = Editor::new(cli.file.as_deref(), keymap, cfg).await?;
     editor.run().await?;
 
     Ok(())
@@ -131,94 +138,90 @@ async fn main() -> Result<(), IjevimError> {
 mod tests {
     use super::*;
 
-    /// Test-only re-implementation of [`parse_args`] that accepts a custom argv.
-    /// This is identical to `parse_args` but without the `std::process::exit`
-    /// calls and without consuming the real process arguments.
-    fn parse_args_for_test(argv: Vec<String>) -> Result<Cli, String> {
-        let mut keymap: Option<Keymap> = None;
-        let mut file: Option<String> = None;
-        let mut mode_taken_file: Option<String> = None;
-
-        for arg in argv {
-            match arg.as_str() {
-                "-h" | "--help" | "-v" | "--version" => {
-                    return Ok(Cli { keymap, file });
-                }
-                "vim" => keymap = Some(Keymap::Vim),
-                "emacs" => keymap = Some(Keymap::Emacs),
-                _ => {
-                    if file.is_none() {
-                        file = Some(arg);
-                    } else if keymap.is_some() && mode_taken_file.is_none() {
-                        mode_taken_file = Some(arg);
-                    }
-                }
-            }
+    fn parse_cli(args: &[&str]) -> Cli {
+        let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        match parse_args(&argv) {
+            CliAction::Edit(cli) => cli,
+            _ => panic!("expected Edit, got Help or Version"),
         }
+    }
 
-        if let Some(f) = mode_taken_file {
-            file = Some(f);
-        }
-        Ok(Cli { keymap, file })
+    #[test]
+    fn parses_help() {
+        assert!(matches!(
+            parse_args(&["--help".into()]),
+            CliAction::Help
+        ));
+        assert!(matches!(
+            parse_args(&["-h".into()]),
+            CliAction::Help
+        ));
+    }
+
+    #[test]
+    fn parses_version() {
+        assert!(matches!(
+            parse_args(&["--version".into()]),
+            CliAction::Version
+        ));
+        assert!(matches!(
+            parse_args(&["-v".into()]),
+            CliAction::Version
+        ));
     }
 
     #[test]
     fn parses_vim_subcommand_without_file() {
-        let cli = parse_args_for_test(vec!["vim".into()]).expect("vim should parse");
+        let cli = parse_cli(&["vim"]);
         assert_eq!(cli.keymap, Some(Keymap::Vim));
         assert_eq!(cli.file, None);
     }
 
     #[test]
     fn parses_emacs_subcommand_without_file() {
-        let cli = parse_args_for_test(vec!["emacs".into()]).expect("emacs should parse");
+        let cli = parse_cli(&["emacs"]);
         assert_eq!(cli.keymap, Some(Keymap::Emacs));
         assert_eq!(cli.file, None);
     }
 
     #[test]
     fn parses_vim_subcommand_with_file() {
-        let cli = parse_args_for_test(vec!["vim".into(), "sample.txt".into()])
-            .expect("vim file should parse");
+        let cli = parse_cli(&["vim", "sample.txt"]);
         assert_eq!(cli.keymap, Some(Keymap::Vim));
         assert_eq!(cli.file.as_deref(), Some("sample.txt"));
     }
 
     #[test]
     fn parses_emacs_subcommand_with_file() {
-        let cli = parse_args_for_test(vec!["emacs".into(), "sample.txt".into()])
-            .expect("emacs file should parse");
+        let cli = parse_cli(&["emacs", "sample.txt"]);
         assert_eq!(cli.keymap, Some(Keymap::Emacs));
         assert_eq!(cli.file.as_deref(), Some("sample.txt"));
     }
 
     #[test]
     fn parses_top_level_file_as_default_vim() {
-        let cli =
-            parse_args_for_test(vec!["sample.txt".into()]).expect("top-level file should parse");
+        let cli = parse_cli(&["sample.txt"]);
         assert_eq!(cli.keymap, None, "no keymap override when no subcommand");
         assert_eq!(cli.file.as_deref(), Some("sample.txt"));
     }
 
     #[test]
     fn honors_parent_file_when_mode_subcommand_is_present() {
-        let cli = parse_args_for_test(vec!["sample.txt".into(), "emacs".into()])
-            .expect("parent file + mode should parse");
+        let cli = parse_cli(&["sample.txt", "emacs"]);
         assert_eq!(cli.keymap, Some(Keymap::Emacs));
         assert_eq!(cli.file.as_deref(), Some("sample.txt"));
     }
 
     #[test]
     fn prefers_subcommand_file_over_parent_file() {
-        let cli = parse_args_for_test(vec!["parent.txt".into(), "vim".into(), "child.txt".into()])
-            .expect("subcommand file should parse");
+        let cli = parse_cli(&["parent.txt", "vim", "child.txt"]);
         assert_eq!(cli.keymap, Some(Keymap::Vim));
         assert_eq!(cli.file.as_deref(), Some("child.txt"));
     }
 
     #[test]
     fn treats_unknown_subcommand_as_file_argument() {
-        let cli = parse_args_for_test(vec!["invalid-mode".into()]).expect("unknown token as file");
+        let cli = parse_cli(&["invalid-mode"]);
         assert_eq!(
             cli.keymap, None,
             "no keymap override for unknown subcommand"

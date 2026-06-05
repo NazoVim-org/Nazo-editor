@@ -22,58 +22,12 @@ impl Editor {
                     "q!" => {
                         self.running = false;
                     }
-                    "w" => {
-                        if let Err(e) = self.buffer.save_file().await {
-                            self.state.set_message(format!("Save failed: {}", e));
-                        } else {
-                            self.plugin_manager
-                                .emit(crate::types::PluginEvent::BufferSave {
-                                    file_path: self.state.file_path.clone(),
-                                });
-                        }
+                    "w" | "w!" => {
+                        self.save_and_emit().await;
                     }
-                    "w!" => {
-                        if let Err(e) = self.buffer.save_file().await {
-                            self.state.set_message(format!("Save failed: {}", e));
-                        } else {
-                            self.plugin_manager
-                                .emit(crate::types::PluginEvent::BufferSave {
-                                    file_path: self.state.file_path.clone(),
-                                });
-                        }
-                    }
-                    "wq" => {
-                        if let Err(e) = self.buffer.save_file().await {
-                            self.state.set_message(format!("Save failed: {}", e));
-                        } else {
-                            self.plugin_manager
-                                .emit(crate::types::PluginEvent::BufferSave {
-                                    file_path: self.state.file_path.clone(),
-                                });
-                            self.running = false;
-                        }
-                    }
-                    "wq!" => {
-                        if let Err(e) = self.buffer.save_file().await {
-                            self.state.set_message(format!("Save failed: {}", e));
-                        } else {
-                            self.plugin_manager
-                                .emit(crate::types::PluginEvent::BufferSave {
-                                    file_path: self.state.file_path.clone(),
-                                });
-                            self.running = false;
-                        }
-                    }
-                    "wqa" | "wa" => {
-                        if let Err(e) = self.buffer.save_file().await {
-                            self.state.set_message(format!("Save failed: {}", e));
-                        } else {
-                            self.plugin_manager
-                                .emit(crate::types::PluginEvent::BufferSave {
-                                    file_path: self.state.file_path.clone(),
-                                });
-                            self.running = false;
-                        }
+                    "wq" | "wq!" | "wqa" | "wa" => {
+                        self.save_and_emit().await;
+                        self.running = false;
                     }
                     "qa" => {
                         self.running = false;
@@ -238,6 +192,22 @@ impl Editor {
 
     async fn reload_file_discard(&mut self) {
         self.reload_file().await;
+    }
+
+    /// Save the current buffer and emit a BufferSave plugin event.
+    /// If the save fails, set an error message instead.
+    async fn save_and_emit(&mut self) {
+        match self.buffer.save_file().await {
+            Ok(()) => {
+                self.plugin_manager
+                    .emit(crate::types::PluginEvent::BufferSave {
+                        file_path: self.state.file_path.clone(),
+                    });
+            }
+            Err(e) => {
+                self.state.set_message(format!("Save failed: {}", e));
+            }
+        }
     }
 
     async fn handle_write_path(&mut self, cmd: &str) {
