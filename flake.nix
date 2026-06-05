@@ -60,6 +60,9 @@
             RUST_BACKTRACE = "1";
 
             shellHook = ''
+              # Clean stale mlua-sys object files that break vendored Lua build
+              find "$HOME/.cargo/registry/src" -path '*/mlua-sys-*/*.o' -delete 2>/dev/null || true
+
               echo "╔═══════════════════════════════════════════════╗"
               echo "║             ijevim devShell                   ║"
               echo "╠═══════════════════════════════════════════════╣"
