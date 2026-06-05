@@ -7,14 +7,45 @@ impl Editor {
         let line = self.engine.state.cursor.line;
         let content = self.engine.buffer.get_line(line);
         let _ = register;
+        let mod_count = self.engine.buffer.modification_count();
 
         if indent {
             self.engine.buffer.insert(line, 0, "\t");
+            self.engine.undo_manager.push(Edit {
+                edit_type: EditType::Insert {
+                    line,
+                    col: 0,
+                    text: "\t".to_string(),
+                },
+                cursor_before: self.engine.state.cursor,
+                cursor_after: self.engine.state.cursor,
+                modification_count: mod_count,
+            });
         } else if content.starts_with('\t') {
             self.engine.buffer.delete(line, 0);
+            self.engine.undo_manager.push(Edit {
+                edit_type: EditType::Delete {
+                    line,
+                    col: 0,
+                    text: "\t".to_string(),
+                },
+                cursor_before: self.engine.state.cursor,
+                cursor_after: self.engine.state.cursor,
+                modification_count: mod_count,
+            });
         } else if content.starts_with("  ") {
             self.engine.buffer.delete(line, 0);
             self.engine.buffer.delete(line, 0);
+            self.engine.undo_manager.push(Edit {
+                edit_type: EditType::Delete {
+                    line,
+                    col: 0,
+                    text: "  ".to_string(),
+                },
+                cursor_before: self.engine.state.cursor,
+                cursor_after: self.engine.state.cursor,
+                modification_count: mod_count,
+            });
         }
 
         self.needs_render = true;

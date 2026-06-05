@@ -852,3 +852,127 @@ async fn vim_c_after_emacs_switch_enters_visual_block() {
         .await;
     assert_eq!(ed.engine.state.mode, Mode::Normal);
 }
+
+// ── Macro recording and playback tests ──────────────────────
+
+#[tokio::test]
+async fn vim_macro_keys_are_stored_correctly() {
+    let mut ed = test_vim_editor("abc\ndef\n");
+
+    // Record qajq (just a 'j' movement)
+    ed.handle_key_for_test(KeyCode::Char('q'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('a'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('j'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('q'), KeyModifiers::NONE).await;
+
+    let keys = ed.engine.state.macros.get('a').cloned();
+    assert!(keys.is_some(), "macro 'a' should exist");
+    let keys = keys.unwrap();
+    assert_eq!(keys.len(), 1, "macro should have exactly 1 key (j)");
+    assert_eq!(keys[0], "j", "macro key should be 'j'");
+
+    // Rewind cursor, play macro via @a
+    ed.engine.state.cursor.line = 1;
+    ed.engine.state.cursor.col = 0;
+
+    ed.handle_key_for_test(KeyCode::Char('@'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('a'), KeyModifiers::NONE).await;
+
+    let (_, line, _, _) = ed.snapshot_for_test();
+    assert_eq!(line, 2, "@a should move to line 2");
+}
+
+#[tokio::test]
+async fn vim_macro_playback_dispatch_has_correct_state() {
+    let mut ed = test_vim_editor("abc\ndef\n");
+
+    // Record qa: x then j
+    ed.handle_key_for_test(KeyCode::Char('q'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('a'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('x'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('j'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('q'), KeyModifiers::NONE).await;
+
+    let keys = ed.engine.state.macros.get('a').cloned().unwrap();
+    assert_eq!(keys, vec!["x", "j"], "macro should be ['x', 'j']");
+
+    // Reset and play via @a
+    ed.set_buffer_for_test("abc\ndef\n");
+    ed.handle_key_for_test(KeyCode::Char('@'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('a'), KeyModifiers::NONE).await;
+
+    let (buf, line, _, _) = ed.snapshot_for_test();
+    assert_eq!(buf, "bc\ndef\n", "x deleted first char on playback");
+    assert_eq!(line, 2, "j moved to line 2 on playback");
+}
+
+#[tokio::test]
+async fn vim_macro_with_insert_mode() {
+    let mut ed = test_vim_editor("ab\ncd\n");
+
+    // qa → i → X → Esc → j → q
+    ed.handle_key_for_test(KeyCode::Char('q'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('a'), KeyModifiers::NONE).await;
+
+    ed.handle_key_for_test(KeyCode::Char('i'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('X'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Esc, KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('j'), KeyModifiers::NONE).await;
+
+    ed.handle_key_for_test(KeyCode::Char('q'), KeyModifiers::NONE).await;
+
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert_eq!(buf, "Xab\ncd\n", "macro inserted 'X' and moved down");
+
+    // Reset buffer and replay
+    ed.set_buffer_for_test("ab\ncd\n");
+
+    ed.handle_key_for_test(KeyCode::Char('@'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('a'), KeyModifiers::NONE).await;
+
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert_eq!(buf, "Xab\ncd\n", "replayed macro on fresh buffer");
+}
+
+#[tokio::test]
+async fn vim_macro_delete_word() {
+    let mut ed = test_vim_editor("hello world\nfoo bar\n");
+
+    // Record: diw
+    ed.handle_key_for_test(KeyCode::Char('q'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('a'), KeyModifiers::NONE).await;
+
+    ed.handle_key_for_test(KeyCode::Char('d'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('i'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('w'), KeyModifiers::NONE).await;
+
+    ed.handle_key_for_test(KeyCode::Char('q'), KeyModifiers::NONE).await;
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert_eq!(buf, " world\nfoo bar\n", "macro deleted 'hello'");
+}
+
+#[tokio::test]
+async fn vim_macro_with_count() {
+    let mut ed = test_vim_editor("a\nb\nc\nd\ne\n");
+
+    // qa → 2j → q
+    ed.handle_key_for_test(KeyCode::Char('q'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('a'), KeyModifiers::NONE).await;
+
+    ed.handle_key_for_test(KeyCode::Char('2'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('j'), KeyModifiers::NONE).await;
+
+    ed.handle_key_for_test(KeyCode::Char('q'), KeyModifiers::NONE).await;
+
+    let (_, line, _, _) = ed.snapshot_for_test();
+    assert_eq!(line, 3, "2j moved to line 3");
+
+    // Reset and replay
+    ed.engine.state.cursor.line = 1;
+
+    ed.handle_key_for_test(KeyCode::Char('@'), KeyModifiers::NONE).await;
+    ed.handle_key_for_test(KeyCode::Char('a'), KeyModifiers::NONE).await;
+
+    let (_, line, _, _) = ed.snapshot_for_test();
+    assert_eq!(line, 3, "@a repeated 2j");
+}

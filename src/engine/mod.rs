@@ -5,7 +5,7 @@ use crate::register::Register;
 use crate::state::{CursorState, InsertState, OperatorState, SearchState};
 use crate::types::{ConfirmAction, DotAction, EditorState, KillRing, Mode};
 use crate::undo::UndoManager;
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyModifiers};
 use std::time::Instant;
 
 /// Signals from Engine to the UI layer after an operation.
@@ -89,8 +89,32 @@ impl Engine {
     }
 
     /// Emit a key-press event to the plugin system and record macros if recording.
-    pub(crate) fn emit_key_event(&mut self, key: KeyCode) {
-        let key_str = match key {
+    pub(crate) fn emit_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) {
+        let key_str = Self::encode_key(key, modifiers);
+
+        self.plugin_manager.emit(crate::types::PluginEvent::Key {
+            mode: self.state.mode,
+            key: key_str.clone(),
+        });
+
+        if self.state.macros.is_recording() {
+            self.state.macros.add_key(key_str);
+        }
+    }
+
+    /// Encode a key with optional modifiers into a stable string for macro storage.
+    ///
+    /// Format: `{modifier-}{key}` where modifier is `C-` for Ctrl, `M-` for Alt.
+    /// Unmodified keys are stored as-is for backward compatibility.
+    fn encode_key(key: KeyCode, modifiers: KeyModifiers) -> String {
+        let prefix = if modifiers.contains(KeyModifiers::CONTROL) {
+            "C-"
+        } else if modifiers.contains(KeyModifiers::ALT) {
+            "M-"
+        } else {
+            ""
+        };
+        let key_body = match key {
             KeyCode::Char(c) => c.to_string(),
             KeyCode::Enter => "Enter".to_string(),
             KeyCode::Esc => "Esc".to_string(),
@@ -119,15 +143,7 @@ impl Engine {
             KeyCode::Media(m) => format!("Media({:?})", m),
             KeyCode::Modifier(m) => format!("Modifier({:?})", m),
         };
-
-        self.plugin_manager.emit(crate::types::PluginEvent::Key {
-            mode: self.state.mode,
-            key: key_str.clone(),
-        });
-
-        if self.state.macros.is_recording() {
-            self.state.macros.add_key(key_str);
-        }
+        format!("{}{}", prefix, key_body)
     }
 
     /// Emit BufferChange event and sync dirty flag.

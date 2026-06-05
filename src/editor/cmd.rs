@@ -51,6 +51,8 @@ impl Editor {
                             self.do_search(query, direction);
                         } else if cmd.starts_with("set ") {
                             self.handle_set_command(cmd);
+                        } else if cmd == "nohlsearch" || cmd == "noh" {
+                            self.engine.state.hlsearch = false;
                         } else if cmd.starts_with("w ") || cmd.starts_with("w! ") {
                             self.handle_write_path(cmd).await;
                         } else if cmd.starts_with("wq ") || cmd.starts_with("wq! ") {
@@ -172,6 +174,25 @@ impl Editor {
             }
             "number!" => {
                 self.engine.state.show_line_numbers = !self.engine.state.show_line_numbers;
+            }
+            "relativenumber" => {
+                self.engine.state.show_relative_numbers = true;
+            }
+            "norelativenumber" | "norelativenumber!" => {
+                self.engine.state.show_relative_numbers = false;
+            }
+            "relativenumber!" => {
+                self.engine.state.show_relative_numbers =
+                    !self.engine.state.show_relative_numbers;
+            }
+            "hlsearch" => {
+                self.engine.state.hlsearch = true;
+            }
+            "nohlsearch" | "nohlsearch!" => {
+                self.engine.state.hlsearch = false;
+            }
+            "hlsearch!" => {
+                self.engine.state.hlsearch = !self.engine.state.hlsearch;
             }
             _ => {
                 self.engine

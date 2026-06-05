@@ -33,7 +33,7 @@ impl KeymapHandler for EmacsKeymap {
             let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
             let has_alt = modifiers.contains(KeyModifiers::ALT);
 
-            editor.emit_key_event(key);
+            editor.emit_key_event(key, modifiers);
 
             if editor.engine.state.has_confirmation() {
                 editor.handle_confirmation(key).await;

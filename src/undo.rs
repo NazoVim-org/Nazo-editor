@@ -120,12 +120,10 @@ impl UndoManager {
             }
             EditType::Merge {
                 line,
-                deleted_newline_col: _,
+                deleted_newline_col,
             } => {
                 let line_idx = line.saturating_sub(1);
-                if line_idx + 1 < buffer.line_count() {
-                    buffer.insert(line_idx, buffer.get_line(line_idx).len(), "\n");
-                }
+                buffer.insert(line_idx, *deleted_newline_col, "\n");
             }
             EditType::Split { line, col } => {
                 let start = buffer.line_to_char(line - 1) + col;

@@ -25,7 +25,7 @@ impl KeymapHandler for VimKeymap {
         modifiers: KeyModifiers,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>> {
         Box::pin(async move {
-            editor.emit_key_event(key);
+            editor.emit_key_event(key, modifiers);
 
             if modifiers.contains(KeyModifiers::CONTROL) {
                 match editor.engine.state.mode {
@@ -36,8 +36,37 @@ impl KeymapHandler for VimKeymap {
                             return;
                         }
                         KeyCode::Char('u') => {
-                            editor.scroll_by(editor.terminal.rows() as usize / 2, false);
-                            editor.needs_render = true;
+                            // Normal: scroll half-pages up; Insert: delete to BOL
+                            if editor.engine.state.mode == Mode::Insert
+                                || editor.engine.state.mode == Mode::Replace
+                            {
+                                editor.insert_delete_to_bol();
+                            } else {
+                                editor.scroll_by(editor.terminal.rows() as usize / 2, false);
+                                editor.needs_render = true;
+                            }
+                            return;
+                        }
+                        KeyCode::Char('w') => {
+                            // Ctrl-w: delete word backward in Insert mode
+                            if editor.engine.state.mode == Mode::Insert
+                                || editor.engine.state.mode == Mode::Replace
+                            {
+                                editor.insert_delete_word_backward();
+                            }
+                            return;
+                        }
+                        KeyCode::Char('r') => {
+                            // Normal: redo; Insert: insert register (Ctrl-r)
+                            if editor.engine.state.mode == Mode::Insert
+                                || editor.engine.state.mode == Mode::Replace
+                            {
+                                editor.engine.insert_state.waiting_register = true;
+                                editor.needs_render = true;
+                            } else {
+                                editor.redo();
+                                editor.needs_render = true;
+                            }
                             return;
                         }
                         KeyCode::Char('y') => {
@@ -52,11 +81,6 @@ impl KeymapHandler for VimKeymap {
                         }
                         KeyCode::Char('g') => {
                             editor.show_file_info();
-                            editor.needs_render = true;
-                            return;
-                        }
-                        KeyCode::Char('r') => {
-                            editor.redo();
                             editor.needs_render = true;
                             return;
                         }

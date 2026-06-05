@@ -91,4 +91,6 @@ pub struct InsertState {
     pub accum: String,
     /// Cursor position when insert mode was entered (for undo cursor_before).
     pub start_pos: Option<Position>,
+    /// Set by Ctrl-r in insert mode; the next non-modifier key selects a register.
+    pub waiting_register: bool,
 }

@@ -52,6 +52,23 @@ impl Editor {
             PendingOperator::Idle => {}
         }
 
+        // ── Macro playback (@x) ──────────────────────────────────
+        // Check BEFORE the outer match because the macro name register
+        // (a-z) overlaps with Vim normal-mode commands like `a` (append).
+        if let Some(_pending) = self.engine.operator_state.macro_play {
+            if let KeyCode::Char(c) = key {
+                if c.is_ascii_lowercase() {
+                    // Clear macro_play BEFORE dispatching so re-entrant
+                    // handle_normal calls don't try to play another macro.
+                    self.engine.operator_state.macro_play = None;
+                    self.play_macro(c).await;
+                    self.needs_render = true;
+                    return;
+                }
+            }
+            self.engine.operator_state.macro_play = None;
+        }
+
         let line_count = self.engine.buffer.line_count();
 
         match key {
@@ -267,9 +284,11 @@ impl Editor {
             }
             KeyCode::Char('r') => {
                 if self.engine.state.command_buffer.is_empty() {
+                    // Sentinel: single-char replace (r{char}) — wait for one char,
+                    // replace, push undo, and exit back to Normal.
+                    self.engine.operator_state.replace_char = Some('\0');
                     let prev_mode = self.engine.state.mode;
                     self.engine.state.mode = Mode::Replace;
-                    self.engine.operator_state.replace_char = None;
                     self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                         from: prev_mode,
                         to: Mode::Replace,
@@ -277,10 +296,11 @@ impl Editor {
                     self.needs_render = true;
                 }
             }
+            // Multi-char Replace mode (R) — replace until Esc.
             KeyCode::Char('R') => {
+                self.engine.operator_state.replace_char = None;
                 let prev_mode = self.engine.state.mode;
                 self.engine.state.mode = Mode::Replace;
-                self.engine.operator_state.replace_char = None;
                 self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Replace,
@@ -526,17 +546,6 @@ impl Editor {
                     _ => {}
                 }
 
-                if let Some(_pending) = self.engine.operator_state.macro_play {
-                    if let KeyCode::Char(c) = key {
-                        if c.is_ascii_lowercase() {
-                            self.play_macro(c);
-                            self.engine.operator_state.macro_play = None;
-                            self.needs_render = true;
-                            return;
-                        }
-                    }
-                    self.engine.operator_state.macro_play = None;
-                }
                 if let Some(pending) = self.engine.operator_state.mark {
                     if let KeyCode::Char(c) = key {
                         if (pending == 'm' && c.is_ascii_lowercase())
@@ -755,6 +764,23 @@ impl Editor {
                     self.engine.state.cursor.line = 1;
                     self.engine.state.cursor.col = 0;
                     self.needs_render = true;
+                } else if let KeyCode::Char('v') = key {
+                    // gv: restore last visual selection
+                    if let (Some(start), Some(vtype)) = (
+                        self.engine.state.last_visual_start,
+                        self.engine.state.last_visual_type,
+                    ) {
+                        self.engine.state.visual_start = Some(start);
+                        self.engine.state.visual_type = Some(vtype);
+                        self.engine.state.cursor = start;
+                        let prev_mode = self.engine.state.mode;
+                        self.engine.state.mode = Mode::Visual;
+                        self.engine.plugin_manager.emit(PluginEvent::ModeChange {
+                            from: prev_mode,
+                            to: Mode::Visual,
+                        });
+                        self.needs_render = true;
+                    }
                 }
             }
             Operator::Scroll => {
@@ -929,24 +955,52 @@ impl Editor {
         self.on_buffer_modified();
     }
 
-    fn delete_char(&mut self, _register: char) {
+    fn delete_char(&mut self, register: char) {
         let line = self.engine.state.cursor.line;
         let col = self.engine.state.cursor.col;
         let line_str = self.engine.buffer.get_line(line);
+        let mod_count = self.engine.buffer.modification_count();
 
         if col >= line_str.len() {
             if line < self.engine.buffer.line_count() {
+                // Merge with next line (EOL x behavior)
                 self.engine.buffer.merge_with_prev_line(line + 1);
+                self.engine.undo_manager.push(Edit {
+                    edit_type: EditType::Merge {
+                        line,
+                        deleted_newline_col: col,
+                    },
+                    cursor_before: self.engine.state.cursor,
+                    cursor_after: self.engine.state.cursor,
+                    modification_count: mod_count,
+                });
+                self.engine.dot_last_action = Some(DotAction::Delete {
+                    text: String::new(),
+                    line: 0,
+                    col: 0,
+                });
             }
         } else {
+            let deleted_text: String = line_str[col..].chars().take(1).collect();
             self.engine.buffer.delete(line, col);
+            self.engine.register.set(register, &deleted_text);
+            self.engine.undo_manager.push(Edit {
+                edit_type: EditType::Delete {
+                    line,
+                    col,
+                    text: deleted_text.clone(),
+                },
+                cursor_before: self.engine.state.cursor,
+                cursor_after: self.engine.state.cursor,
+                modification_count: mod_count,
+            });
+            self.engine.dot_last_action = Some(DotAction::Delete {
+                text: String::new(),
+                line: 0,
+                col: 0,
+            });
         }
 
-        self.engine.dot_last_action = Some(DotAction::Delete {
-            text: String::new(),
-            line,
-            col,
-        });
         self.on_buffer_modified();
     }
 
@@ -964,17 +1018,28 @@ impl Editor {
                     }
                     self.on_buffer_modified();
                 }
-                DotAction::Delete { text, line, col } => {
-                    if !text.is_empty() {
-                        self.engine.buffer.insert(line, col, &text);
-                        self.on_buffer_modified();
-                    }
+                DotAction::Delete { text: _, line: _, col: _ } => {
+                    // Re-delete one char at current cursor position.
+                    self.delete_char('"');
+                    self.on_buffer_modified();
                 }
                 DotAction::Change { text, line, col } => {
                     self.engine.buffer.insert(line, col, &text);
                     self.engine.state.cursor.line = line;
                     self.engine.state.cursor.col = col;
                     self.on_buffer_modified();
+                }
+                DotAction::Replace { ch } => {
+                    let line = self.engine.state.cursor.line;
+                    let col = self.engine.state.cursor.col;
+                    let line_str = self.engine.buffer.get_line(line);
+                    if col < line_str.len() {
+                        let start = self.engine.buffer.line_to_char(line.saturating_sub(1)) + col;
+                        let end = start + 1;
+                        self.engine.buffer.remove_range(start, end);
+                        self.engine.buffer.insert_char(line, col, ch);
+                        self.on_buffer_modified();
+                    }
                 }
             }
         }
@@ -1011,6 +1076,7 @@ impl Editor {
             return;
         }
 
+        let mod_count = self.engine.buffer.modification_count();
         let current_line = self.engine.buffer.get_line(line);
         let current_stripped = current_line.trim_end_matches('\n');
         let next_line = self.engine.buffer.get_line(line + 1);
@@ -1029,9 +1095,19 @@ impl Editor {
             self.engine.state.cursor.col = join_pos;
         }
 
+        self.engine.undo_manager.push(Edit {
+            edit_type: EditType::Merge {
+                line,
+                deleted_newline_col: join_pos,
+            },
+            cursor_before: self.engine.state.cursor,
+            cursor_after: self.engine.state.cursor,
+            modification_count: mod_count,
+        });
+
         self.engine.dot_last_action = Some(DotAction::Change {
             text: String::new(),
-            line,
+            line: 0,
             col: 0,
         });
         self.on_buffer_modified();

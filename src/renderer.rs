@@ -62,13 +62,14 @@ impl Renderer {
         self.show_line_numbers = state.show_line_numbers;
 
         // ── Line‑number metrics ──
-        let line_number_width = if state.show_line_numbers {
+        let show_any_numbers = state.show_line_numbers || state.show_relative_numbers;
+        let line_number_width = if show_any_numbers {
             let total = buffer.line_count().max(1);
             total.to_string().len()
         } else {
             0
         };
-        let line_number_prefix = if state.show_line_numbers {
+        let line_number_prefix = if show_any_numbers {
             line_number_width + 2
         } else {
             0
@@ -120,8 +121,20 @@ impl Renderer {
 
         for (screen_row, vline) in visual_lines.iter().enumerate() {
             // Line number prefix
-            if state.show_line_numbers {
-                let num_str = format!("{:width$}  ", vline.buffer_line, width = line_number_width);
+            if show_any_numbers {
+                let display_num = if state.show_relative_numbers {
+                    let dist =
+                        (vline.buffer_line as isize - state.cursor.line as isize).unsigned_abs();
+                    if dist == 0 && state.show_line_numbers {
+                        // Hybrid: current line shows absolute number
+                        vline.buffer_line
+                    } else {
+                        dist
+                    }
+                } else {
+                    vline.buffer_line
+                };
+                let num_str = format!("{:width$}  ", display_num, width = line_number_width);
                 for (col, ch) in num_str.chars().enumerate() {
                     let style = if col < line_number_width {
                         gray_style
@@ -152,7 +165,7 @@ impl Renderer {
 
         // ── Tilde lines (beyond end of buffer) ──
         for screen_row in visual_lines.len()..visible_rows {
-            if state.show_line_numbers {
+            if show_any_numbers {
                 let num_str = format!("{:width$}  ", "~", width = line_number_width);
                 for (col, ch) in num_str.chars().enumerate() {
                     let style = if col < line_number_width {

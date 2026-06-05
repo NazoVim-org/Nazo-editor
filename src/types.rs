@@ -144,6 +144,14 @@ impl Macros {
     }
 
     pub fn stop_recording(&mut self) -> Option<char> {
+        // Pop the last recorded key — it's always the `q` that
+        // triggered the stop, emitted by the keymap handler before
+        // `handle_normal` had a chance to check `is_recording()`.
+        if let Some(name) = self.recording {
+            if let Some(keys) = self.macros.get_mut(&name) {
+                keys.pop();
+            }
+        }
         self.recording.take()
     }
 
@@ -192,10 +200,14 @@ pub struct EditorState {
     pub last_message: Option<String>,
     pub visual_start: Option<Position>,
     pub visual_type: Option<VisualType>,
+    pub last_visual_start: Option<Position>,
+    pub last_visual_type: Option<VisualType>,
     pub marks: Marks,
     pub macros: Macros,
     pub confirmation_prompt: Option<ConfirmationPrompt>,
     pub show_line_numbers: bool,
+    pub show_relative_numbers: bool,
+    pub hlsearch: bool,
     pub wrap: bool,
     pub mark: Option<Position>,
     pub region_active: bool,
@@ -212,10 +224,14 @@ impl Default for EditorState {
             last_message: None,
             visual_start: None,
             visual_type: None,
+            last_visual_start: None,
+            last_visual_type: None,
             marks: Marks::new(),
             macros: Macros::new(),
             confirmation_prompt: None,
             show_line_numbers: true,
+            show_relative_numbers: false,
+            hlsearch: true,
             wrap: true,
             mark: None,
             region_active: false,
@@ -368,5 +384,8 @@ pub enum DotAction {
         text: String,
         line: usize,
         col: usize,
+    },
+    Replace {
+        ch: char,
     },
 }

@@ -125,6 +125,7 @@ impl Editor {
             file_path: buffer.file_path().map(|p| p.to_path_buf()),
             cursor: Position { line: 1, col: 0 },
             show_line_numbers: cfg.show_line_numbers,
+            show_relative_numbers: cfg.show_relative_numbers,
             wrap: cfg.wrap,
             ..EditorState::default()
         };
@@ -226,8 +227,8 @@ impl Editor {
 
     /// Emit a key-press event to the plugin system and record macros if recording.
     /// Called by both Vim and Emacs keymap handlers.
-    pub(crate) fn emit_key_event(&mut self, key: KeyCode) {
-        self.engine.emit_key_event(key);
+    pub(crate) fn emit_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) {
+        self.engine.emit_key_event(key, modifiers);
     }
 
     /// Expose count from operator state.
@@ -320,6 +321,8 @@ mod tests {
             macros: crate::types::Macros::new(),
             confirmation_prompt: None,
             show_line_numbers: true,
+            show_relative_numbers: false,
+            hlsearch: true,
             wrap: true,
             mark: None,
             region_active: false,
