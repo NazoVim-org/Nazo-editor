@@ -10,7 +10,8 @@ impl Editor {
                 self.engine.state.mode = Mode::Normal;
                 self.engine.state.visual_start = None;
                 self.engine.state.visual_type = None;
-                self.engine.plugin_manager
+                self.engine
+                    .plugin_manager
                     .emit(crate::types::PluginEvent::ModeChange {
                         from: prev_mode,
                         to: Mode::Normal,
@@ -23,7 +24,8 @@ impl Editor {
                 self.engine.state.mode = Mode::Normal;
                 self.engine.state.visual_start = None;
                 self.engine.state.visual_type = None;
-                self.engine.plugin_manager
+                self.engine
+                    .plugin_manager
                     .emit(crate::types::PluginEvent::ModeChange {
                         from: prev_mode,
                         to: Mode::Normal,
@@ -36,7 +38,8 @@ impl Editor {
                 self.engine.state.mode = Mode::Normal;
                 self.engine.state.visual_start = None;
                 self.engine.state.visual_type = None;
-                self.engine.plugin_manager
+                self.engine
+                    .plugin_manager
                     .emit(crate::types::PluginEvent::ModeChange {
                         from: prev_mode,
                         to: Mode::Normal,
@@ -49,7 +52,8 @@ impl Editor {
                 self.engine.state.mode = Mode::Insert;
                 self.engine.state.visual_start = None;
                 self.engine.state.visual_type = None;
-                self.engine.plugin_manager
+                self.engine
+                    .plugin_manager
                     .emit(crate::types::PluginEvent::ModeChange {
                         from: prev_mode,
                         to: Mode::Insert,
@@ -61,21 +65,37 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('l') => {
-                let line_len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
-                self.engine.state.cursor.col = (self.engine.state.cursor.col + 1).min(line_len.saturating_sub(1));
+                let line_len = self
+                    .engine
+                    .buffer
+                    .get_line(self.engine.state.cursor.line)
+                    .len();
+                self.engine.state.cursor.col =
+                    (self.engine.state.cursor.col + 1).min(line_len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('j') => {
                 let line_count = self.engine.buffer.line_count();
                 self.engine.state.cursor.line = (self.engine.state.cursor.line + 1).min(line_count);
-                let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
-                self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
+                let len = self
+                    .engine
+                    .buffer
+                    .get_line(self.engine.state.cursor.line)
+                    .len();
+                self.engine.state.cursor.col =
+                    self.engine.state.cursor.col.min(len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('k') => {
-                self.engine.state.cursor.line = self.engine.state.cursor.line.saturating_sub(1).max(1);
-                let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
-                self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
+                self.engine.state.cursor.line =
+                    self.engine.state.cursor.line.saturating_sub(1).max(1);
+                let len = self
+                    .engine
+                    .buffer
+                    .get_line(self.engine.state.cursor.line)
+                    .len();
+                self.engine.state.cursor.col =
+                    self.engine.state.cursor.col.min(len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('0') => {
@@ -99,7 +119,8 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('I') if self.engine.state.visual_type == Some(VisualType::Block) => {
-                let s_col = self.engine
+                let s_col = self
+                    .engine
                     .state
                     .visual_start
                     .map(|s| s.col)
@@ -110,7 +131,8 @@ impl Editor {
                 self.engine.state.visual_type = None;
                 let prev_mode = self.engine.state.mode;
                 self.engine.state.mode = Mode::Insert;
-                self.engine.plugin_manager
+                self.engine
+                    .plugin_manager
                     .emit(crate::types::PluginEvent::ModeChange {
                         from: prev_mode,
                         to: Mode::Insert,
@@ -118,7 +140,8 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('A') if self.engine.state.visual_type == Some(VisualType::Block) => {
-                let e_col = self.engine
+                let e_col = self
+                    .engine
                     .state
                     .visual_start
                     .map(|s| s.col)
@@ -129,7 +152,8 @@ impl Editor {
                 self.engine.state.visual_type = None;
                 let prev_mode = self.engine.state.mode;
                 self.engine.state.mode = Mode::Insert;
-                self.engine.plugin_manager
+                self.engine
+                    .plugin_manager
                     .emit(crate::types::PluginEvent::ModeChange {
                         from: prev_mode,
                         to: Mode::Insert,
@@ -141,12 +165,17 @@ impl Editor {
     }
 
     fn visual_yank(&mut self) {
-        if let (Some(start), Some(vtype)) = (&self.engine.state.visual_start, self.engine.state.visual_type) {
+        if let (Some(start), Some(vtype)) = (
+            &self.engine.state.visual_start,
+            self.engine.state.visual_type,
+        ) {
             let content = match vtype {
                 VisualType::Character => {
                     let (s_line, s_col, e_line, e_col) =
                         self.normalize_selection(start, &self.engine.state.cursor);
-                    self.engine.buffer.get_char_range(s_line, s_col, e_line, e_col)
+                    self.engine
+                        .buffer
+                        .get_char_range(s_line, s_col, e_line, e_col)
                 }
                 VisualType::Line => {
                     let (s_line, e_line) =
@@ -165,12 +194,18 @@ impl Editor {
     }
 
     fn visual_delete(&mut self) {
-        if let (Some(start), Some(vtype)) = (&self.engine.state.visual_start, self.engine.state.visual_type) {
+        if let (Some(start), Some(vtype)) = (
+            &self.engine.state.visual_start,
+            self.engine.state.visual_type,
+        ) {
             let (cursor_line, cursor_col) = match vtype {
                 VisualType::Character => {
                     let (s_line, s_col, e_line, e_col) =
                         self.normalize_selection(start, &self.engine.state.cursor);
-                    let content = self.engine.buffer.delete_range(s_line, s_col, e_line, e_col);
+                    let content = self
+                        .engine
+                        .buffer
+                        .delete_range(s_line, s_col, e_line, e_col);
                     self.engine.register.set('"', &content);
                     (s_line, s_col)
                 }
@@ -194,7 +229,10 @@ impl Editor {
                     let e_line = start.line.max(self.engine.state.cursor.line);
                     let s_col = start.col.min(self.engine.state.cursor.col);
                     let e_col = start.col.max(self.engine.state.cursor.col);
-                    let content = self.engine.buffer.delete_block_range(s_line, s_col, e_line, e_col);
+                    let content = self
+                        .engine
+                        .buffer
+                        .delete_block_range(s_line, s_col, e_line, e_col);
                     self.engine.register.set('"', &content);
                     (s_line, s_col)
                 }

@@ -38,17 +38,24 @@ impl Editor {
         };
         match key {
             KeyCode::Char('j') => {
-                self.engine.state.cursor.line = (self.engine.state.cursor.line + 1).min(self.engine.buffer.line_count());
+                self.engine.state.cursor.line =
+                    (self.engine.state.cursor.line + 1).min(self.engine.buffer.line_count());
             }
             KeyCode::Char('k') => {
-                self.engine.state.cursor.line = self.engine.state.cursor.line.saturating_sub(1).max(1);
+                self.engine.state.cursor.line =
+                    self.engine.state.cursor.line.saturating_sub(1).max(1);
             }
             KeyCode::Char('h') => {
                 self.engine.state.cursor.col = self.engine.state.cursor.col.saturating_sub(1);
             }
             KeyCode::Char('l') => {
-                let line_len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
-                self.engine.state.cursor.col = (self.engine.state.cursor.col + 1).min(line_len.saturating_sub(1));
+                let line_len = self
+                    .engine
+                    .buffer
+                    .get_line(self.engine.state.cursor.line)
+                    .len();
+                self.engine.state.cursor.col =
+                    (self.engine.state.cursor.col + 1).min(line_len.saturating_sub(1));
             }
             // i, a, x: recognized but currently no-ops (see note above).
             _ => {}

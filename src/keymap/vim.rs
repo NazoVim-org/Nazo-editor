@@ -76,12 +76,12 @@ impl KeymapHandler for VimKeymap {
                             editor.engine.state.mode = Mode::Visual;
                             editor.engine.state.visual_start = Some(editor.engine.state.cursor);
                             editor.engine.state.visual_type = Some(crate::types::VisualType::Block);
-                            editor.engine
-                                .plugin_manager
-                                .emit(crate::types::PluginEvent::ModeChange {
+                            editor.engine.plugin_manager.emit(
+                                crate::types::PluginEvent::ModeChange {
                                     from: prev_mode,
                                     to: Mode::Visual,
-                                });
+                                },
+                            );
                             editor.needs_render = true;
                             return;
                         }

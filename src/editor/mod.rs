@@ -43,7 +43,9 @@ impl Editor {
     pub(crate) fn transition_mode(&mut self, to: Mode) {
         let from = self.engine.state.mode;
         self.engine.state.mode = to;
-        self.engine.plugin_manager.emit(crate::types::PluginEvent::ModeChange { from, to });
+        self.engine
+            .plugin_manager
+            .emit(crate::types::PluginEvent::ModeChange { from, to });
         self.needs_render = true;
     }
 
@@ -146,7 +148,9 @@ impl Editor {
             &self.engine.state,
             &self.engine.highlights,
         ) {
-            self.engine.state.set_message(format!("Render error: {}", e));
+            self.engine
+                .state
+                .set_message(format!("Render error: {}", e));
         }
         self.needs_render = false;
 
@@ -179,20 +183,15 @@ impl Editor {
             #[cfg(feature = "syntax")]
             {
                 let now = Instant::now();
-                if self.engine.buffer.modification_count()
-                    > self.engine.last_highlight_mod_count
+                if self.engine.buffer.modification_count() > self.engine.last_highlight_mod_count
                     && now.duration_since(self.engine.last_keypress_time)
                         > Duration::from_millis(150)
                 {
-                    self.engine.highlights = self
-                        .engine
-                        .highlighter
-                        .update(
-                            &self.engine.buffer.to_string(),
-                            self.engine.state.file_path.as_deref(),
-                        );
-                    self.engine.last_highlight_mod_count =
-                        self.engine.buffer.modification_count();
+                    self.engine.highlights = self.engine.highlighter.update(
+                        &self.engine.buffer.to_string(),
+                        self.engine.state.file_path.as_deref(),
+                    );
+                    self.engine.last_highlight_mod_count = self.engine.buffer.modification_count();
                 }
             }
 

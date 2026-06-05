@@ -633,8 +633,8 @@ async fn emacs_ctrl_t_transpose_chars() {
     let mut ed = Editor::new_headless_for_test(Keymap::Emacs).expect("headless");
     ed.set_buffer_for_test("hello\n");
     ed.engine.state.cursor.col = 2; // at 'e' and 'l' (col 2 → between 'e' and 'l')
-                             // Actually transpose swaps chars before and at cursor
-                             // Cursor at col 1: swaps 'h'(0) and 'e'(1)
+                                    // Actually transpose swaps chars before and at cursor
+                                    // Cursor at col 1: swaps 'h'(0) and 'e'(1)
     ed.engine.state.cursor.col = 1;
     ed.handle_key_for_test(KeyCode::Char('t'), KeyModifiers::CONTROL)
         .await;
@@ -790,7 +790,10 @@ async fn switch_keymap_resets_pending_state() {
         .await;
     // Switch keymap mid-command — should reset pending count
     ed.switch_keymap("emacs");
-    assert!(ed.engine.operator_state.count.is_none(), "pending_count cleared");
+    assert!(
+        ed.engine.operator_state.count.is_none(),
+        "pending_count cleared"
+    );
     assert!(
         matches!(ed.engine.operator_state.pending, PendingOperator::Idle),
         "command_state reset"

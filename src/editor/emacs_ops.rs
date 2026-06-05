@@ -35,7 +35,10 @@ impl Editor {
         }
 
         let mod_count = self.engine.buffer.modification_count();
-        let content = self.engine.buffer.delete_range(s_line, s_col, e_line, e_col);
+        let content = self
+            .engine
+            .buffer
+            .delete_range(s_line, s_col, e_line, e_col);
         if content.is_empty() {
             self.deactivate_region();
             return;
@@ -83,7 +86,10 @@ impl Editor {
             } else {
                 (cursor.line, cursor.col, mark.line, mark.col)
             };
-        let content = self.engine.buffer.get_char_range(s_line, s_col, e_line, e_col);
+        let content = self
+            .engine
+            .buffer
+            .get_char_range(s_line, s_col, e_line, e_col);
         if content.is_empty() {
             self.deactivate_region();
             return;
@@ -100,8 +106,11 @@ impl Editor {
             self.engine.cursor_state.yank_start = Some(self.engine.state.cursor);
             self.engine.cursor_state.yank_length = text.chars().count();
             self.engine.kill_ring.reset_index();
-            self.engine.buffer
-                .insert(self.engine.state.cursor.line, self.engine.state.cursor.col, text);
+            self.engine.buffer.insert(
+                self.engine.state.cursor.line,
+                self.engine.state.cursor.col,
+                text,
+            );
             self.engine.state.cursor.col += self.engine.cursor_state.yank_length;
             self.on_buffer_modified();
         }
@@ -116,8 +125,14 @@ impl Editor {
         if len == 0 {
             return;
         }
-        let start_char = self.engine.buffer.line_to_char(start.line.saturating_sub(1)) + start.col;
-        self.engine.buffer.remove_range(start_char, start_char + len);
+        let start_char = self
+            .engine
+            .buffer
+            .line_to_char(start.line.saturating_sub(1))
+            + start.col;
+        self.engine
+            .buffer
+            .remove_range(start_char, start_char + len);
         let next = self.engine.kill_ring.yank_pop().map(|s| s.to_string());
         if let Some(ref text) = next {
             self.engine.buffer.insert(start.line, start.col, text);
@@ -154,8 +169,11 @@ impl Editor {
     }
 
     pub fn insert_tab(&mut self) {
-        self.engine.buffer
-            .insert_char(self.engine.state.cursor.line, self.engine.state.cursor.col, '\t');
+        self.engine.buffer.insert_char(
+            self.engine.state.cursor.line,
+            self.engine.state.cursor.col,
+            '\t',
+        );
         self.engine.state.cursor.col += 1;
         self.on_buffer_modified();
     }
@@ -174,7 +192,8 @@ impl Editor {
     }
 
     pub fn kill_word(&mut self) {
-        let (_, _, end_col) = self.engine
+        let (_, _, end_col) = self
+            .engine
             .buffer
             .get_word_range(self.engine.state.cursor.line, self.engine.state.cursor.col);
         if end_col > self.engine.state.cursor.col {
@@ -229,22 +248,32 @@ impl Editor {
     }
 
     pub(crate) fn insert_char(&mut self, c: char) {
-        self.engine.buffer
-            .insert_char(self.engine.state.cursor.line, self.engine.state.cursor.col, c);
+        self.engine.buffer.insert_char(
+            self.engine.state.cursor.line,
+            self.engine.state.cursor.col,
+            c,
+        );
         self.engine.state.cursor.col += 1;
         self.on_buffer_modified();
     }
 
     pub(crate) fn delete_char_backward(&mut self) {
         if self.engine.state.cursor.col > 0 {
-            self.engine.buffer
-                .delete(self.engine.state.cursor.line, self.engine.state.cursor.col - 1);
+            self.engine.buffer.delete(
+                self.engine.state.cursor.line,
+                self.engine.state.cursor.col - 1,
+            );
             self.engine.state.cursor.col -= 1;
             self.on_buffer_modified();
         } else if self.engine.state.cursor.line > 1 {
-            let merged = self.engine.buffer.get_line(self.engine.state.cursor.line - 1);
+            let merged = self
+                .engine
+                .buffer
+                .get_line(self.engine.state.cursor.line - 1);
             let prev_len = merged.len();
-            self.engine.buffer.merge_with_prev_line(self.engine.state.cursor.line);
+            self.engine
+                .buffer
+                .merge_with_prev_line(self.engine.state.cursor.line);
             self.engine.state.cursor.line -= 1;
             self.engine.state.cursor.col = prev_len.saturating_sub(1);
             self.on_buffer_modified();
@@ -254,10 +283,15 @@ impl Editor {
     pub(crate) fn insert_newline(&mut self) {
         let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
         let (_, after) = line.split_at(self.engine.state.cursor.col);
-        self.engine.buffer
-            .insert(self.engine.state.cursor.line, self.engine.state.cursor.col, "\n");
+        self.engine.buffer.insert(
+            self.engine.state.cursor.line,
+            self.engine.state.cursor.col,
+            "\n",
+        );
         if !after.is_empty() {
-            self.engine.buffer.insert(self.engine.state.cursor.line + 1, 0, after);
+            self.engine
+                .buffer
+                .insert(self.engine.state.cursor.line + 1, 0, after);
         }
         self.engine.state.cursor.line += 1;
         self.engine.state.cursor.col = 0;
@@ -267,9 +301,11 @@ impl Editor {
     pub(crate) fn delete_char_forward(&mut self) {
         let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
         if self.engine.state.cursor.col < line.len() {
-            let deleted_char = line[self.engine.state.cursor.col..self.engine.state.cursor.col + 1].to_string();
+            let deleted_char =
+                line[self.engine.state.cursor.col..self.engine.state.cursor.col + 1].to_string();
             let mod_count = self.engine.buffer.modification_count();
-            self.engine.buffer
+            self.engine
+                .buffer
                 .delete(self.engine.state.cursor.line, self.engine.state.cursor.col);
             self.engine.undo_manager.push(Edit {
                 edit_type: EditType::Delete {

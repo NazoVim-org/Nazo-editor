@@ -3,7 +3,8 @@ use crate::types::SearchDirection;
 
 impl Editor {
     pub(crate) fn search_word_under_cursor(&mut self) {
-        let (word, _, _) = self.engine
+        let (word, _, _) = self
+            .engine
             .buffer
             .get_word_range(self.engine.state.cursor.line, self.engine.state.cursor.col);
         if !word.is_empty() {
@@ -41,28 +42,37 @@ impl Editor {
         }
 
         if direction == SearchDirection::Forward {
-            self.engine.search_state.current_idx = self.engine
+            self.engine.search_state.current_idx = self
+                .engine
                 .search_state
                 .results
                 .iter()
                 .position(|r| {
                     r.line > self.engine.state.cursor.line
-                        || (r.line == self.engine.state.cursor.line && r.start_col > self.engine.state.cursor.col)
+                        || (r.line == self.engine.state.cursor.line
+                            && r.start_col > self.engine.state.cursor.col)
                 })
                 .unwrap_or(0);
         } else {
-            self.engine.search_state.current_idx = self.engine
+            self.engine.search_state.current_idx = self
+                .engine
                 .search_state
                 .results
                 .iter()
                 .rposition(|r| {
                     r.line < self.engine.state.cursor.line
-                        || (r.line == self.engine.state.cursor.line && r.start_col < self.engine.state.cursor.col)
+                        || (r.line == self.engine.state.cursor.line
+                            && r.start_col < self.engine.state.cursor.col)
                 })
                 .unwrap_or(self.engine.search_state.results.len() - 1);
         }
 
-        if let Some(result) = self.engine.search_state.results.get(self.engine.search_state.current_idx) {
+        if let Some(result) = self
+            .engine
+            .search_state
+            .results
+            .get(self.engine.search_state.current_idx)
+        {
             self.engine.state.cursor.line = result.line;
             self.engine.state.cursor.col = result.start_col;
         }

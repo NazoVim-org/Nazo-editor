@@ -13,7 +13,8 @@ impl Editor {
         if let KeyCode::Char(c) = key {
             if c.is_ascii_digit() && (c != '0' || self.engine.operator_state.count.is_some()) {
                 let digit = c.to_digit(10).unwrap() as usize;
-                self.engine.operator_state.count = Some(self.engine.operator_state.count.unwrap_or(0) * 10 + digit);
+                self.engine.operator_state.count =
+                    Some(self.engine.operator_state.count.unwrap_or(0) * 10 + digit);
                 self.needs_render = true;
                 return;
             }
@@ -22,7 +23,10 @@ impl Editor {
         // Resolve 3-key operator sequences (e.g., diw, da(, ciw)
         // and 2-key operator + motion sequences (e.g., dd, fw).
         // Single `replace` to avoid consuming operator state on text-object mismatch.
-        let state = std::mem::replace(&mut self.engine.operator_state.pending, PendingOperator::Idle);
+        let state = std::mem::replace(
+            &mut self.engine.operator_state.pending,
+            PendingOperator::Idle,
+        );
         match state {
             PendingOperator::AwaitingTextObject {
                 op,
@@ -59,23 +63,39 @@ impl Editor {
             }
             KeyCode::Char('l') => {
                 let count = self.take_count();
-                let line_len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+                let line_len = self
+                    .engine
+                    .buffer
+                    .get_line(self.engine.state.cursor.line)
+                    .len();
                 self.engine.state.cursor.col =
                     (self.engine.state.cursor.col + count).min(line_len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('j') => {
                 let count = self.take_count();
-                self.engine.state.cursor.line = (self.engine.state.cursor.line + count).min(line_count);
-                let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
-                self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
+                self.engine.state.cursor.line =
+                    (self.engine.state.cursor.line + count).min(line_count);
+                let len = self
+                    .engine
+                    .buffer
+                    .get_line(self.engine.state.cursor.line)
+                    .len();
+                self.engine.state.cursor.col =
+                    self.engine.state.cursor.col.min(len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('k') => {
                 let count = self.take_count();
-                self.engine.state.cursor.line = self.engine.state.cursor.line.saturating_sub(count).max(1);
-                let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
-                self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
+                self.engine.state.cursor.line =
+                    self.engine.state.cursor.line.saturating_sub(count).max(1);
+                let len = self
+                    .engine
+                    .buffer
+                    .get_line(self.engine.state.cursor.line)
+                    .len();
+                self.engine.state.cursor.col =
+                    self.engine.state.cursor.col.min(len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('i') => {
@@ -95,7 +115,13 @@ impl Editor {
                 let prev_mode = self.engine.state.mode;
                 self.engine.insert_state.accum.clear();
                 self.engine.insert_state.start_pos = Some(self.engine.state.cursor);
-                if self.engine.state.cursor.col < self.engine.buffer.get_line(self.engine.state.cursor.line).len() {
+                if self.engine.state.cursor.col
+                    < self
+                        .engine
+                        .buffer
+                        .get_line(self.engine.state.cursor.line)
+                        .len()
+                {
                     self.engine.state.cursor.col += 1;
                 }
                 self.engine.state.mode = Mode::Insert;
@@ -110,7 +136,11 @@ impl Editor {
                 let prev_mode = self.engine.state.mode;
                 self.engine.insert_state.accum.clear();
                 self.engine.insert_state.start_pos = Some(self.engine.state.cursor);
-                let line_len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+                let line_len = self
+                    .engine
+                    .buffer
+                    .get_line(self.engine.state.cursor.line)
+                    .len();
                 self.engine.state.cursor.col = line_len;
                 self.engine.state.mode = Mode::Insert;
                 self.engine.plugin_manager.emit(PluginEvent::ModeChange {
@@ -155,7 +185,8 @@ impl Editor {
             }
             KeyCode::Char('$') => {
                 let count = self.take_count();
-                let target = (self.engine.state.cursor.line + count - 1).min(self.engine.buffer.line_count());
+                let target = (self.engine.state.cursor.line + count - 1)
+                    .min(self.engine.buffer.line_count());
                 let line = self.engine.buffer.get_line(target);
                 let line_len = line.len();
                 let end_col = if line_len > 0 && line.ends_with('\n') {
@@ -190,7 +221,9 @@ impl Editor {
                 let _count = self.take_count();
                 let content = self.engine.buffer.get_line(self.engine.state.cursor.line);
                 self.engine.register.set('"', &content);
-                self.engine.buffer.delete_line(self.engine.state.cursor.line);
+                self.engine
+                    .buffer
+                    .delete_line(self.engine.state.cursor.line);
                 let prev_mode = self.engine.state.mode;
                 self.engine.state.mode = Mode::Insert;
                 self.engine.plugin_manager.emit(PluginEvent::ModeChange {
@@ -593,7 +626,9 @@ impl Editor {
                     for _ in 0..count {
                         let content = self.engine.buffer.get_line(self.engine.state.cursor.line);
                         self.engine.register.set(register, &content);
-                        self.engine.buffer.delete_line(self.engine.state.cursor.line);
+                        self.engine
+                            .buffer
+                            .delete_line(self.engine.state.cursor.line);
                     }
                     let prev_mode = self.engine.state.mode;
                     self.engine.state.mode = Mode::Insert;
@@ -609,12 +644,16 @@ impl Editor {
                     self.on_buffer_modified();
                 }
                 KeyCode::Char('w') => {
-                    let (word, start, _) = self.engine
-                        .buffer
-                        .get_word_range(self.engine.state.cursor.line, self.engine.state.cursor.col);
+                    let (word, start, _) = self.engine.buffer.get_word_range(
+                        self.engine.state.cursor.line,
+                        self.engine.state.cursor.col,
+                    );
                     if !word.is_empty() {
-                        let char_start =
-                            self.engine.buffer.line_to_char(self.engine.state.cursor.line - 1) + start;
+                        let char_start = self
+                            .engine
+                            .buffer
+                            .line_to_char(self.engine.state.cursor.line - 1)
+                            + start;
                         let char_end = char_start + word.len();
                         let content = self.engine.buffer.get_char_range(
                             self.engine.state.cursor.line,
@@ -753,7 +792,8 @@ impl Editor {
     }
 
     fn yank_word(&mut self, register: char) {
-        let (word, _, _) = self.engine
+        let (word, _, _) = self
+            .engine
             .buffer
             .get_word_range(self.engine.state.cursor.line, self.engine.state.cursor.col);
         self.engine.register.set(register, &word);
@@ -796,17 +836,26 @@ impl Editor {
         if line > line_count {
             self.engine.state.cursor.line = line_count.max(1);
         }
-        let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+        let len = self
+            .engine
+            .buffer
+            .get_line(self.engine.state.cursor.line)
+            .len();
         self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
         self.on_buffer_modified();
     }
 
     fn delete_word(&mut self, register: char) {
-        let (word, start, _) = self.engine
+        let (word, start, _) = self
+            .engine
             .buffer
             .get_word_range(self.engine.state.cursor.line, self.engine.state.cursor.col);
         if !word.is_empty() {
-            let char_start = self.engine.buffer.line_to_char(self.engine.state.cursor.line - 1) + start;
+            let char_start = self
+                .engine
+                .buffer
+                .line_to_char(self.engine.state.cursor.line - 1)
+                + start;
             let char_end = char_start + word.len();
             self.engine.buffer.remove_range(char_start, char_end);
             self.engine.register.set(register, &word);
@@ -825,11 +874,18 @@ impl Editor {
             for (i, line) in lines.iter().enumerate() {
                 if i == 0 {
                     if before {
-                        self.engine.buffer.insert(self.engine.state.cursor.line, 0, line);
-                        self.engine.buffer.insert(self.engine.state.cursor.line, line.len(), "\n");
+                        self.engine
+                            .buffer
+                            .insert(self.engine.state.cursor.line, 0, line);
+                        self.engine
+                            .buffer
+                            .insert(self.engine.state.cursor.line, line.len(), "\n");
                     } else {
-                        self.engine.buffer
-                            .insert(self.engine.state.cursor.line, self.engine.state.cursor.col, line);
+                        self.engine.buffer.insert(
+                            self.engine.state.cursor.line,
+                            self.engine.state.cursor.col,
+                            line,
+                        );
                         self.engine.buffer.insert(
                             self.engine.state.cursor.line,
                             self.engine.state.cursor.col + line.len(),
@@ -852,11 +908,17 @@ impl Editor {
             }
         } else {
             if before {
-                self.engine.buffer
-                    .insert(self.engine.state.cursor.line, self.engine.state.cursor.col, &content);
+                self.engine.buffer.insert(
+                    self.engine.state.cursor.line,
+                    self.engine.state.cursor.col,
+                    &content,
+                );
             } else {
-                self.engine.buffer
-                    .insert(self.engine.state.cursor.line, self.engine.state.cursor.col + 1, &content);
+                self.engine.buffer.insert(
+                    self.engine.state.cursor.line,
+                    self.engine.state.cursor.col + 1,
+                    &content,
+                );
                 self.engine.state.cursor.col += 1;
             }
             if !before {
@@ -893,8 +955,11 @@ impl Editor {
             match action.clone() {
                 DotAction::Insert { text } => {
                     for ch in text.chars() {
-                        self.engine.buffer
-                            .insert_char(self.engine.state.cursor.line, self.engine.state.cursor.col, ch);
+                        self.engine.buffer.insert_char(
+                            self.engine.state.cursor.line,
+                            self.engine.state.cursor.col,
+                            ch,
+                        );
                         self.engine.state.cursor.col += 1;
                     }
                     self.on_buffer_modified();

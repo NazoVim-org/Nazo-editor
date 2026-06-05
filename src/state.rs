@@ -4,7 +4,7 @@ use crate::types::{PendingOperator, Position, SearchDirection, SearchResult};
 ///
 /// Separated from the main cursor position (`EditorState.cursor`) because
 /// these fields are only relevant during Emacs yank-pop cycles.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CursorState {
     /// Cursor position before the last yank (for yank-pop cycle).
     pub yank_start: Option<Position>,
@@ -12,21 +12,12 @@ pub struct CursorState {
     pub yank_length: usize,
 }
 
-impl Default for CursorState {
-    fn default() -> Self {
-        Self {
-            yank_start: None,
-            yank_length: 0,
-        }
-    }
-}
-
 /// Tracks pending Vim operator state machine.
 ///
 /// After pressing an operator key (d, y, c, >, <, etc.), the editor waits
 /// for a motion/text-object/second key to complete the operation. This struct
 /// holds all the transient state accumulated during that sequence.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OperatorState {
     /// Pending operator state machine.
     pub pending: PendingOperator,
@@ -41,19 +32,6 @@ pub struct OperatorState {
     pub macro_play: Option<char>,
     /// Character to replace with in Replace mode; None means normal Replace.
     pub replace_char: Option<char>,
-}
-
-impl Default for OperatorState {
-    fn default() -> Self {
-        Self {
-            pending: PendingOperator::Idle,
-            count: None,
-            register: None,
-            mark: None,
-            macro_play: None,
-            replace_char: None,
-        }
-    }
 }
 
 impl OperatorState {
@@ -107,19 +85,10 @@ impl Default for SearchState {
 ///
 /// When the user types in insert mode, characters are accumulated and pushed
 /// as a single undo entry when leaving insert mode.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InsertState {
     /// Accumulated characters typed during the current insert-mode session.
     pub accum: String,
     /// Cursor position when insert mode was entered (for undo cursor_before).
     pub start_pos: Option<Position>,
-}
-
-impl Default for InsertState {
-    fn default() -> Self {
-        Self {
-            accum: String::new(),
-            start_pos: None,
-        }
-    }
 }

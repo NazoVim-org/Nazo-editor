@@ -9,8 +9,10 @@ impl Editor {
                 // Push accumulated insert text as a single undo group
                 if !self.engine.insert_state.accum.is_empty() {
                     let text = std::mem::take(&mut self.engine.insert_state.accum);
-                    let cursor_before = self.engine
-                        .insert_state.start_pos
+                    let cursor_before = self
+                        .engine
+                        .insert_state
+                        .start_pos
                         .unwrap_or(crate::types::Position { line: 1, col: 0 });
                     self.engine.insert_state.start_pos = None;
                     let mod_count = self.engine.buffer.modification_count();
@@ -32,13 +34,18 @@ impl Editor {
             }
             KeyCode::Backspace => {
                 if self.engine.state.cursor.col > 0 {
-                    self.engine.buffer
-                        .delete(self.engine.state.cursor.line, self.engine.state.cursor.col - 1);
+                    self.engine.buffer.delete(
+                        self.engine.state.cursor.line,
+                        self.engine.state.cursor.col - 1,
+                    );
                     self.engine.state.cursor.col -= 1;
                     self.engine.insert_state.accum.pop();
                     self.on_buffer_modified();
                 } else if self.engine.state.cursor.line > 1 {
-                    let new_col = self.engine.buffer.merge_with_prev_line(self.engine.state.cursor.line);
+                    let new_col = self
+                        .engine
+                        .buffer
+                        .merge_with_prev_line(self.engine.state.cursor.line);
                     self.engine.state.cursor.line -= 1;
                     self.engine.state.cursor.col = new_col;
                     // Remove the last newline from accumulator
@@ -47,16 +54,22 @@ impl Editor {
                 }
             }
             KeyCode::Enter => {
-                self.engine.buffer
-                    .insert(self.engine.state.cursor.line, self.engine.state.cursor.col, "\n");
+                self.engine.buffer.insert(
+                    self.engine.state.cursor.line,
+                    self.engine.state.cursor.col,
+                    "\n",
+                );
                 self.engine.state.cursor.line += 1;
                 self.engine.state.cursor.col = 0;
                 self.engine.insert_state.accum.push('\n');
                 self.on_buffer_modified();
             }
             KeyCode::Char(c) => {
-                self.engine.buffer
-                    .insert_char(self.engine.state.cursor.line, self.engine.state.cursor.col, c);
+                self.engine.buffer.insert_char(
+                    self.engine.state.cursor.line,
+                    self.engine.state.cursor.col,
+                    c,
+                );
                 self.engine.state.cursor.col += 1;
                 self.engine.insert_state.accum.push(c);
                 self.on_buffer_modified();
@@ -89,8 +102,11 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Enter => {
-                self.engine.buffer
-                    .insert(self.engine.state.cursor.line, self.engine.state.cursor.col, "\n");
+                self.engine.buffer.insert(
+                    self.engine.state.cursor.line,
+                    self.engine.state.cursor.col,
+                    "\n",
+                );
                 self.engine.state.cursor.line += 1;
                 self.engine.state.cursor.col = 0;
                 self.on_buffer_modified();

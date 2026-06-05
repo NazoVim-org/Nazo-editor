@@ -65,7 +65,9 @@ impl Editor {
                                 vec![]
                             };
                             if !self.engine.plugin_manager.execute_command(cmd_name, args) {
-                                self.engine.state.set_message(format!("Unknown command: {}", cmd));
+                                self.engine
+                                    .state
+                                    .set_message(format!("Unknown command: {}", cmd));
                             }
                         }
                     }
@@ -117,7 +119,8 @@ impl Editor {
             }
         };
 
-        let action = self.engine
+        let action = self
+            .engine
             .state
             .confirmation_prompt
             .as_ref()
@@ -145,7 +148,8 @@ impl Editor {
                 if let Err(e) = self.engine.buffer.save_file().await {
                     self.engine.state.set_message(format!("Save failed: {}", e));
                 } else {
-                    self.engine.plugin_manager
+                    self.engine
+                        .plugin_manager
                         .emit(crate::types::PluginEvent::BufferSave {
                             file_path: self.engine.state.file_path.clone(),
                         });
@@ -170,7 +174,8 @@ impl Editor {
                 self.engine.state.show_line_numbers = !self.engine.state.show_line_numbers;
             }
             _ => {
-                self.engine.state
+                self.engine
+                    .state
                     .set_message(format!("Unknown set option: {}", args));
             }
         }
@@ -183,7 +188,8 @@ impl Editor {
                     self.engine.buffer = buf;
                 }
                 Err(e) => {
-                    self.engine.state
+                    self.engine
+                        .state
                         .set_message(format!("Failed to reload file: {}", e));
                 }
             }
@@ -199,7 +205,8 @@ impl Editor {
     async fn save_and_emit(&mut self) {
         match self.engine.buffer.save_file().await {
             Ok(()) => {
-                self.engine.plugin_manager
+                self.engine
+                    .plugin_manager
                     .emit(crate::types::PluginEvent::BufferSave {
                         file_path: self.engine.state.file_path.clone(),
                     });
@@ -220,7 +227,8 @@ impl Editor {
         match self.engine.buffer.save_to_path(&path).await {
             Ok(_) => {
                 self.engine.state.file_path = Some(path);
-                self.engine.plugin_manager
+                self.engine
+                    .plugin_manager
                     .emit(crate::types::PluginEvent::BufferSave {
                         file_path: self.engine.state.file_path.clone(),
                     });
@@ -237,14 +245,17 @@ impl Editor {
             .trim_start_matches("wq ")
             .trim();
         if path_str.is_empty() {
-            self.engine.state.set_message("Expected filename after 'wq'");
+            self.engine
+                .state
+                .set_message("Expected filename after 'wq'");
             return;
         }
         let path = std::path::PathBuf::from(path_str);
         match self.engine.buffer.save_to_path(&path).await {
             Ok(_) => {
                 self.engine.state.file_path = Some(path);
-                self.engine.plugin_manager
+                self.engine
+                    .plugin_manager
                     .emit(crate::types::PluginEvent::BufferSave {
                         file_path: self.engine.state.file_path.clone(),
                     });

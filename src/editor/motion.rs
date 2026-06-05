@@ -7,23 +7,40 @@ impl Editor {
         self.engine.state.cursor.line = (self.engine.state.cursor.line + terminal_rows)
             .min(line_count)
             .max(1);
-        let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+        let len = self
+            .engine
+            .buffer
+            .get_line(self.engine.state.cursor.line)
+            .len();
         self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
     }
 
     pub(crate) fn page_up(&mut self) {
         let terminal_rows = self.terminal.rows() as usize;
-        self.engine.state.cursor.line = self.engine.state.cursor.line.saturating_sub(terminal_rows).max(1);
-        let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+        self.engine.state.cursor.line = self
+            .engine
+            .state
+            .cursor
+            .line
+            .saturating_sub(terminal_rows)
+            .max(1);
+        let len = self
+            .engine
+            .buffer
+            .get_line(self.engine.state.cursor.line)
+            .len();
         self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
     }
 
     pub(crate) fn scroll_by(&mut self, lines: usize, forward: bool) {
         let line_count = self.engine.buffer.line_count();
         if forward {
-            self.engine.state.cursor.line = (self.engine.state.cursor.line + lines).min(line_count).max(1);
+            self.engine.state.cursor.line = (self.engine.state.cursor.line + lines)
+                .min(line_count)
+                .max(1);
         } else {
-            self.engine.state.cursor.line = self.engine.state.cursor.line.saturating_sub(lines).max(1);
+            self.engine.state.cursor.line =
+                self.engine.state.cursor.line.saturating_sub(lines).max(1);
         }
     }
 
@@ -55,7 +72,12 @@ impl Editor {
     pub fn scroll_cursor_to_center(&mut self) {
         let terminal_rows = self.terminal.rows() as usize;
         let visible_rows = terminal_rows.saturating_sub(2);
-        let scroll_pos = self.engine.state.cursor.line.saturating_sub(visible_rows / 2);
+        let scroll_pos = self
+            .engine
+            .state
+            .cursor
+            .line
+            .saturating_sub(visible_rows / 2);
         self.engine.state.cursor.line = scroll_pos.max(1);
     }
 
@@ -71,8 +93,13 @@ impl Editor {
     }
 
     pub(crate) fn cursor_right(&mut self, n: usize) {
-        let line_len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
-        self.engine.state.cursor.col = (self.engine.state.cursor.col + n).min(line_len.saturating_sub(1));
+        let line_len = self
+            .engine
+            .buffer
+            .get_line(self.engine.state.cursor.line)
+            .len();
+        self.engine.state.cursor.col =
+            (self.engine.state.cursor.col + n).min(line_len.saturating_sub(1));
         self.needs_render = true;
     }
 
@@ -84,14 +111,22 @@ impl Editor {
     pub(crate) fn cursor_down(&mut self, n: usize) {
         let line_count = self.engine.buffer.line_count();
         self.engine.state.cursor.line = (self.engine.state.cursor.line + n).min(line_count);
-        let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+        let len = self
+            .engine
+            .buffer
+            .get_line(self.engine.state.cursor.line)
+            .len();
         self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
         self.needs_render = true;
     }
 
     pub(crate) fn cursor_up(&mut self, n: usize) {
         self.engine.state.cursor.line = self.engine.state.cursor.line.saturating_sub(n).max(1);
-        let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+        let len = self
+            .engine
+            .buffer
+            .get_line(self.engine.state.cursor.line)
+            .len();
         self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
         self.needs_render = true;
     }
@@ -254,7 +289,12 @@ impl Editor {
                         break;
                     }
                     current_line -= 1;
-                    current_col = self.engine.buffer.get_line(current_line).len().saturating_sub(1);
+                    current_col = self
+                        .engine
+                        .buffer
+                        .get_line(current_line)
+                        .len()
+                        .saturating_sub(1);
                 } else {
                     current_col -= 1;
                 }

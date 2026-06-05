@@ -38,7 +38,6 @@ impl EngineResult {
             ..Self::default()
         }
     }
-
 }
 
 /// Core editor engine — owns all editor state and operations.
@@ -134,7 +133,8 @@ impl Engine {
     /// Emit BufferChange event and sync dirty flag.
     pub(crate) fn emit_buffer_change(&mut self) {
         self.state.dirty = self.buffer.is_dirty();
-        self.plugin_manager.emit(crate::types::PluginEvent::BufferChange);
+        self.plugin_manager
+            .emit(crate::types::PluginEvent::BufferChange);
     }
 
     pub(crate) fn undo(&mut self) -> EngineResult {
