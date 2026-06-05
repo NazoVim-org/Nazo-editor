@@ -48,7 +48,9 @@ impl PluginManager {
 
     /// Load all plugins from init files and plugins directory.
     ///
-    /// 1. Load `init.{lua,lisp,js,nix}` from config dir (first match wins per ext).
+    /// 1. Load `init.{lua,lisp,js,nix}` from config dir (first match wins per ext;
+    ///    each extension is only consulted when its corresponding `plugin-*`
+    ///    feature is enabled).
     /// 2. Load all files from plugins/ directory (extension-based dispatch).
     /// 3. Call `setup()` on every loaded plugin.
     /// 4. Emit `PluginEvent::Ready`.
@@ -56,10 +58,32 @@ impl PluginManager {
         // Step 1: load init files from config dir
         let config_dir = Self::config_dir();
         if config_dir.exists() {
-            for ext in &["lua", "lisp", "js", "nix"] {
-                let init_path = config_dir.join(format!("init.{}", ext));
-                if init_path.exists() {
-                    self.load_single(&init_path);
+            #[cfg(feature = "plugin-lua")]
+            {
+                let p = config_dir.join("init.lua");
+                if p.exists() {
+                    self.load_single(&p);
+                }
+            }
+            #[cfg(feature = "plugin-lisp")]
+            {
+                let p = config_dir.join("init.lisp");
+                if p.exists() {
+                    self.load_single(&p);
+                }
+            }
+            #[cfg(feature = "plugin-js")]
+            {
+                let p = config_dir.join("init.js");
+                if p.exists() {
+                    self.load_single(&p);
+                }
+            }
+            #[cfg(feature = "plugin-nix")]
+            {
+                let p = config_dir.join("init.nix");
+                if p.exists() {
+                    self.load_single(&p);
                 }
             }
         }

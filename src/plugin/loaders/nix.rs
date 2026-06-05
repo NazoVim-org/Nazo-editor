@@ -1,3 +1,5 @@
+#![cfg(feature = "plugin-nix")]
+
 use crate::plugin::{Plugin, PluginApi};
 use crate::types::PluginEvent;
 use std::path::Path;

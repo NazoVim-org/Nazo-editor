@@ -569,7 +569,12 @@ mod tests {
     fn test_save_resets_dirty() {
         let mut buf = TextBuffer::with_text("test\n");
         buf.set_file_path(Some(std::env::temp_dir().join("test_ijevim.txt")));
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        // Use a current-thread runtime; this matches the editor's runtime
+        // flavour and keeps tokio's rt-multi-thread feature unrequired.
+        // No `enable_all()` — we don't need the time driver for `tokio::fs`.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
         rt.block_on(async {
             buf.save_file().await.expect("Save failed");
         });
