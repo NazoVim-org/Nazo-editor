@@ -148,14 +148,8 @@ mod tests {
 
     #[test]
     fn parses_help() {
-        assert!(matches!(
-            parse_args(&["--help".into()]),
-            CliAction::Help
-        ));
-        assert!(matches!(
-            parse_args(&["-h".into()]),
-            CliAction::Help
-        ));
+        assert!(matches!(parse_args(&["--help".into()]), CliAction::Help));
+        assert!(matches!(parse_args(&["-h".into()]), CliAction::Help));
     }
 
     #[test]
@@ -164,10 +158,7 @@ mod tests {
             parse_args(&["--version".into()]),
             CliAction::Version
         ));
-        assert!(matches!(
-            parse_args(&["-v".into()]),
-            CliAction::Version
-        ));
+        assert!(matches!(parse_args(&["-v".into()]), CliAction::Version));
     }
 
     #[test]
