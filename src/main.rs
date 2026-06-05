@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use ijevim::config::Config;
 use ijevim::editor::Editor;
-use ijevim::types::Keymap;
+use ijevim::types::{IjevimError, Keymap};
 
 #[derive(Parser)]
 #[command(name = "ivim")]
@@ -41,7 +41,7 @@ fn resolve_cli(cli: Cli) -> (Option<Keymap>, Option<String>) {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), IjevimError> {
     // Runtime initialised by #[tokio::main]
 
     // Set panic hook to restore terminal state

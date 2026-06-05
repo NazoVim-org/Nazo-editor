@@ -1,11 +1,13 @@
-use crate::types::IjevimError;
+use crate::types::{IjevimError, Result};
 use ropey::Rope;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct TextBuffer {
     doc: Rope,
-    pub file_path: Option<PathBuf>,
-    pub dirty: bool,
+    file_path: Option<PathBuf>,
+    /// Mirror of `modification_count != saved_modification_count`.
+    /// Kept in sync internally; mutate via mutation methods only.
+    dirty: bool,
     modification_count: usize,
     pub(crate) saved_modification_count: usize,
 }
@@ -45,19 +47,28 @@ impl TextBuffer {
     pub fn insert(&mut self, line: usize, col: usize, text: &str) {
         let line_idx = line.saturating_sub(1);
         if line_idx >= self.doc.len_lines() {
-            if self.doc.len_chars() == 0 {
-                self.doc.insert(0, "\n");
-            } else if line_idx == self.doc.len_lines() {
+            // Caller is targeting a line past the current end. Materialise the
+            // new line by appending a newline, then drop the text on it.
+            // Skip when the gap is more than one line (caller error).
+            if line_idx == self.doc.len_lines() {
                 self.doc.insert(self.doc.len_chars(), "\n");
+                self.mark_modified();
+            } else if self.doc.len_chars() == 0 {
+                // Empty rope still reports `len_lines() == 1`. Treat an insert
+                // beyond line 1 on an empty rope as a single-line append.
+                if line_idx > 1 {
+                    return;
+                }
+                self.doc.insert(0, "\n");
+                self.mark_modified();
             } else {
                 return;
             }
-            self.dirty = true;
-            self.modification_count += 1;
+
             if text != "\n" {
                 let insert_pos = self.doc.len_chars();
                 self.doc.insert(insert_pos, text);
-                self.modification_count += 1;
+                self.mark_modified();
             }
             return;
         }
@@ -66,8 +77,7 @@ impl TextBuffer {
         let char_idx = line_start + col.min(self.doc.line(line_idx).len_chars());
 
         self.doc.insert(char_idx, text);
-        self.dirty = true;
-        self.modification_count += 1;
+        self.mark_modified();
     }
 
     pub fn delete(&mut self, line: usize, col: usize) {
@@ -84,8 +94,7 @@ impl TextBuffer {
         }
 
         self.doc.remove(char_idx..char_idx + 1);
-        self.dirty = true;
-        self.modification_count += 1;
+        self.mark_modified();
     }
 
     pub fn insert_char(&mut self, line: usize, col: usize, ch: char) {
@@ -117,20 +126,19 @@ impl TextBuffer {
         }
 
         self.doc.remove(newline_pos..newline_pos + 1);
-        self.dirty = true;
-        self.modification_count += 1;
+        self.mark_modified();
 
         prev_line_len - 1
     }
 
-    pub async fn load_file(path: &str) -> Result<Self, IjevimError> {
+    pub async fn load_file(path: &str) -> Result<Self> {
         let content = tokio::fs::read_to_string(path).await?;
         let mut buffer = Self::with_text(&content);
         buffer.file_path = Some(PathBuf::from(path));
         Ok(buffer)
     }
 
-    pub async fn save_file(&mut self) -> Result<(), IjevimError> {
+    pub async fn save_file(&mut self) -> Result<()> {
         if let Some(path) = self.file_path.clone() {
             self.save_to_path(&path).await
         } else {
@@ -138,12 +146,11 @@ impl TextBuffer {
         }
     }
 
-    pub async fn save_to_path(&mut self, path: &std::path::Path) -> Result<(), IjevimError> {
+    pub async fn save_to_path(&mut self, path: &Path) -> Result<()> {
         let content = self.doc.to_string();
         tokio::fs::write(path, content).await?;
         self.file_path = Some(path.to_path_buf());
-        self.saved_modification_count = self.modification_count;
-        self.dirty = false;
+        self.mark_clean();
         Ok(())
     }
 
@@ -152,17 +159,33 @@ impl TextBuffer {
         self.doc.to_string()
     }
 
+    /// Monotonically increasing counter incremented on every buffer mutation.
+    /// The undo manager uses this to detect post-edit divergence from a
+    /// captured snapshot.
     pub fn modification_count(&self) -> usize {
         self.modification_count
     }
 
+    /// `true` if the buffer has not been modified since the last save/load.
     pub fn is_clean(&self) -> bool {
         self.modification_count == self.saved_modification_count
     }
 
-    pub fn reset_clean_state(&mut self) {
+    /// `true` if [`Self::is_clean`] returns `false`.
+    pub fn is_dirty(&self) -> bool {
+        !self.is_clean()
+    }
+
+    /// Reset the dirty flag to match the current contents. Call after a
+    /// successful save or after loading/replacing buffer text.
+    pub fn mark_clean(&mut self) {
         self.saved_modification_count = self.modification_count;
         self.dirty = false;
+    }
+
+    /// Back-compat alias for [`Self::mark_clean`].
+    pub fn reset_clean_state(&mut self) {
+        self.mark_clean();
     }
 
     pub(crate) fn reset_modification_count(&mut self, count: usize) {
@@ -175,8 +198,7 @@ impl TextBuffer {
             self.doc.remove(0..len);
         }
         self.doc.insert(0, text);
-        self.dirty = true;
-        self.modification_count += 1;
+        self.mark_modified();
     }
 
     pub fn line_to_char(&self, line_idx: usize) -> usize {
@@ -185,6 +207,40 @@ impl TextBuffer {
 
     pub fn len_chars(&self) -> usize {
         self.doc.len_chars()
+    }
+
+    /// Returns the path the buffer was loaded from, or `None` if it has never
+    /// been associated with a file on disk.
+    pub fn file_path(&self) -> Option<&Path> {
+        self.file_path.as_deref()
+    }
+
+    /// Replace the associated file path. Use this when rebinding a buffer to a
+    /// different file (e.g., after `:w newpath`).
+    pub fn set_file_path(&mut self, path: Option<PathBuf>) {
+        self.file_path = path;
+    }
+
+    /// Single point of truth for marking the buffer as modified. All mutation
+    /// methods funnel through this helper to keep `dirty` and
+    /// `modification_count` in lock-step.
+    fn mark_modified(&mut self) {
+        self.modification_count += 1;
+        self.dirty = true;
+    }
+
+    /// Test-only: force the dirty flag without going through a real mutation.
+    /// Crate-private so unit tests in `editor/` can set up quit-confirmation
+    /// scenarios without having to type a character first.
+    #[cfg(test)]
+    pub(crate) fn force_dirty(&mut self, dirty: bool) {
+        if dirty {
+            // Increment past `saved_modification_count` to make `is_dirty()` true.
+            self.modification_count = self.saved_modification_count + 1;
+            self.dirty = true;
+        } else {
+            self.mark_clean();
+        }
     }
 
     pub fn get_word_at(&self, line: usize, col: usize) -> (String, usize, usize) {
@@ -301,8 +357,7 @@ impl TextBuffer {
             if self.doc.len_chars() == 0 {
                 self.doc.insert(0, "\n");
             }
-            self.dirty = true;
-            self.modification_count += 1;
+            self.mark_modified();
         }
 
         content
@@ -331,8 +386,7 @@ impl TextBuffer {
 
         if char_start < char_end {
             self.doc.remove(char_start..char_end);
-            self.dirty = true;
-            self.modification_count += 1;
+            self.mark_modified();
         }
 
         content
@@ -341,8 +395,7 @@ impl TextBuffer {
     pub fn remove_range(&mut self, start: usize, end: usize) {
         if start < end {
             self.doc.remove(start..end);
-            self.dirty = true;
-            self.modification_count += 1;
+            self.mark_modified();
         }
     }
 
@@ -461,8 +514,7 @@ impl TextBuffer {
                 let char_end = self.doc.line_to_char(line_idx) + end;
                 if char_start < char_end && char_end <= self.doc.len_chars() {
                     self.doc.remove(char_start..char_end);
-                    self.dirty = true;
-                    self.modification_count += 1;
+                    self.mark_modified();
                 }
             }
         }
@@ -485,7 +537,7 @@ mod tests {
         let mut buf = TextBuffer::new();
         buf.insert_char(1, 0, 'a');
         assert_eq!(buf.get_line(1), "a");
-        assert!(buf.dirty);
+        assert!(buf.is_dirty());
         assert_eq!(buf.modification_count(), 1);
     }
 
@@ -494,7 +546,7 @@ mod tests {
         let mut buf = TextBuffer::new();
         buf.insert(1, 0, "hello");
         assert_eq!(buf.get_line(1), "hello");
-        assert!(buf.dirty);
+        assert!(buf.is_dirty());
     }
 
     #[test]
@@ -502,7 +554,7 @@ mod tests {
         let mut buf = TextBuffer::with_text("ab\n");
         buf.delete(1, 0);
         assert_eq!(buf.get_line(1), "b\n");
-        assert!(buf.dirty);
+        assert!(buf.is_dirty());
     }
 
     #[test]
@@ -510,17 +562,30 @@ mod tests {
         let mut buf = TextBuffer::with_text("hello\nworld\n");
         buf.merge_with_prev_line(2);
         assert_eq!(buf.to_string(), "helloworld\n");
-        assert!(buf.dirty);
+        assert!(buf.is_dirty());
     }
 
     #[test]
     fn test_save_resets_dirty() {
         let mut buf = TextBuffer::with_text("test\n");
-        buf.file_path = Some(std::env::temp_dir().join("test_ijevim.txt"));
+        buf.set_file_path(Some(std::env::temp_dir().join("test_ijevim.txt")));
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             buf.save_file().await.expect("Save failed");
         });
-        assert!(!buf.dirty);
+        assert!(!buf.is_dirty());
+    }
+
+    #[test]
+    fn test_is_dirty_mirrors_modification_count() {
+        let mut buf = TextBuffer::new();
+        assert!(!buf.is_dirty());
+        assert!(buf.is_clean());
+        buf.insert_char(1, 0, 'x');
+        assert!(buf.is_dirty());
+        assert!(!buf.is_clean());
+        buf.mark_clean();
+        assert!(!buf.is_dirty());
+        assert!(buf.is_clean());
     }
 }

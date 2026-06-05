@@ -735,7 +735,7 @@ impl Editor {
             Operator::SaveQuit => {
                 if let KeyCode::Char('Z') = key {
                     self.save_file_async().await;
-                    if !self.buffer.dirty {
+                    if !self.buffer.is_dirty() {
                         self.running = false;
                     }
                 }
