@@ -1,12 +1,14 @@
 pub mod buffer;
 pub mod config;
 pub mod editor;
+pub(crate) mod engine;
 pub mod highlight;
 pub mod keymap;
 pub mod plugin;
 pub mod register;
 pub mod renderer;
 pub mod screen;
+pub mod state;
 pub mod terminal;
 pub mod types;
 pub mod undo;

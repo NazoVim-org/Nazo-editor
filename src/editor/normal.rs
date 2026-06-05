@@ -1,4 +1,5 @@
-use crate::editor::{DotAction, Editor};
+use crate::editor::Editor;
+use crate::types::DotAction;
 use crate::types::{Mode, Operator, PendingOperator, PluginEvent, VisualType};
 use crate::undo::{Edit, EditType};
 use crossterm::event::KeyCode;
@@ -10,9 +11,9 @@ impl Editor {
         // '0' is only accumulated if there's already a pending count (e.g., "20j").
         // Standalone '0' falls through to the match arm for column-zero.
         if let KeyCode::Char(c) = key {
-            if c.is_ascii_digit() && (c != '0' || self.pending_count.is_some()) {
+            if c.is_ascii_digit() && (c != '0' || self.engine.operator_state.count.is_some()) {
                 let digit = c.to_digit(10).unwrap() as usize;
-                self.pending_count = Some(self.pending_count.unwrap_or(0) * 10 + digit);
+                self.engine.operator_state.count = Some(self.engine.operator_state.count.unwrap_or(0) * 10 + digit);
                 self.needs_render = true;
                 return;
             }
@@ -21,7 +22,7 @@ impl Editor {
         // Resolve 3-key operator sequences (e.g., diw, da(, ciw)
         // and 2-key operator + motion sequences (e.g., dd, fw).
         // Single `replace` to avoid consuming operator state on text-object mismatch.
-        let state = std::mem::replace(&mut self.pending_op, PendingOperator::Idle);
+        let state = std::mem::replace(&mut self.engine.operator_state.pending, PendingOperator::Idle);
         match state {
             PendingOperator::AwaitingTextObject {
                 op,
@@ -47,43 +48,43 @@ impl Editor {
             PendingOperator::Idle => {}
         }
 
-        let line_count = self.buffer.line_count();
+        let line_count = self.engine.buffer.line_count();
 
         match key {
             // ── Motions with count support ───────────────────────
             KeyCode::Char('h') => {
                 let count = self.take_count();
-                self.state.cursor.col = self.state.cursor.col.saturating_sub(count);
+                self.engine.state.cursor.col = self.engine.state.cursor.col.saturating_sub(count);
                 self.needs_render = true;
             }
             KeyCode::Char('l') => {
                 let count = self.take_count();
-                let line_len = self.buffer.get_line(self.state.cursor.line).len();
-                self.state.cursor.col =
-                    (self.state.cursor.col + count).min(line_len.saturating_sub(1));
+                let line_len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+                self.engine.state.cursor.col =
+                    (self.engine.state.cursor.col + count).min(line_len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('j') => {
                 let count = self.take_count();
-                self.state.cursor.line = (self.state.cursor.line + count).min(line_count);
-                let len = self.buffer.get_line(self.state.cursor.line).len();
-                self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
+                self.engine.state.cursor.line = (self.engine.state.cursor.line + count).min(line_count);
+                let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+                self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('k') => {
                 let count = self.take_count();
-                self.state.cursor.line = self.state.cursor.line.saturating_sub(count).max(1);
-                let len = self.buffer.get_line(self.state.cursor.line).len();
-                self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
+                self.engine.state.cursor.line = self.engine.state.cursor.line.saturating_sub(count).max(1);
+                let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+                self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
                 self.needs_render = true;
             }
             KeyCode::Char('i') => {
                 let _count = self.take_count();
-                let prev_mode = self.state.mode;
-                self.insert_accum.clear();
-                self.insert_start_pos = Some(self.state.cursor);
-                self.state.mode = Mode::Insert;
-                self.plugin_manager.emit(PluginEvent::ModeChange {
+                let prev_mode = self.engine.state.mode;
+                self.engine.insert_state.accum.clear();
+                self.engine.insert_state.start_pos = Some(self.engine.state.cursor);
+                self.engine.state.mode = Mode::Insert;
+                self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Insert,
                 });
@@ -91,14 +92,14 @@ impl Editor {
             }
             KeyCode::Char('a') => {
                 let _count = self.take_count();
-                let prev_mode = self.state.mode;
-                self.insert_accum.clear();
-                self.insert_start_pos = Some(self.state.cursor);
-                if self.state.cursor.col < self.buffer.get_line(self.state.cursor.line).len() {
-                    self.state.cursor.col += 1;
+                let prev_mode = self.engine.state.mode;
+                self.engine.insert_state.accum.clear();
+                self.engine.insert_state.start_pos = Some(self.engine.state.cursor);
+                if self.engine.state.cursor.col < self.engine.buffer.get_line(self.engine.state.cursor.line).len() {
+                    self.engine.state.cursor.col += 1;
                 }
-                self.state.mode = Mode::Insert;
-                self.plugin_manager.emit(PluginEvent::ModeChange {
+                self.engine.state.mode = Mode::Insert;
+                self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Insert,
                 });
@@ -106,13 +107,13 @@ impl Editor {
             }
             KeyCode::Char('A') => {
                 let _count = self.take_count();
-                let prev_mode = self.state.mode;
-                self.insert_accum.clear();
-                self.insert_start_pos = Some(self.state.cursor);
-                let line_len = self.buffer.get_line(self.state.cursor.line).len();
-                self.state.cursor.col = line_len;
-                self.state.mode = Mode::Insert;
-                self.plugin_manager.emit(PluginEvent::ModeChange {
+                let prev_mode = self.engine.state.mode;
+                self.engine.insert_state.accum.clear();
+                self.engine.insert_state.start_pos = Some(self.engine.state.cursor);
+                let line_len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+                self.engine.state.cursor.col = line_len;
+                self.engine.state.mode = Mode::Insert;
+                self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Insert,
                 });
@@ -120,10 +121,10 @@ impl Editor {
             }
             KeyCode::Char(':') => {
                 let _count = self.take_count();
-                let prev_mode = self.state.mode;
-                self.state.mode = Mode::Command;
-                self.state.command_buffer.clear();
-                self.plugin_manager.emit(PluginEvent::ModeChange {
+                let prev_mode = self.engine.state.mode;
+                self.engine.state.mode = Mode::Command;
+                self.engine.state.command_buffer.clear();
+                self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Command,
                 });
@@ -131,39 +132,39 @@ impl Editor {
             }
             KeyCode::Char('/') => {
                 let _count = self.take_count();
-                let prev_mode = self.state.mode;
-                self.state.mode = Mode::Command;
-                self.state.command_buffer.clear();
-                self.state.command_buffer.push('/');
-                self.plugin_manager.emit(PluginEvent::ModeChange {
+                let prev_mode = self.engine.state.mode;
+                self.engine.state.mode = Mode::Command;
+                self.engine.state.command_buffer.clear();
+                self.engine.state.command_buffer.push('/');
+                self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Command,
                 });
                 self.needs_render = true;
             }
             KeyCode::Char('0') => {
-                self.state.cursor.col = 0;
+                self.engine.state.cursor.col = 0;
                 self.needs_render = true;
             }
             KeyCode::Char('^') => {
                 let _count = self.take_count();
-                let line = self.buffer.get_line(self.state.cursor.line);
+                let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
                 let first_non_blank = line.chars().position(|c| !c.is_whitespace()).unwrap_or(0);
-                self.state.cursor.col = first_non_blank;
+                self.engine.state.cursor.col = first_non_blank;
                 self.needs_render = true;
             }
             KeyCode::Char('$') => {
                 let count = self.take_count();
-                let target = (self.state.cursor.line + count - 1).min(self.buffer.line_count());
-                let line = self.buffer.get_line(target);
+                let target = (self.engine.state.cursor.line + count - 1).min(self.engine.buffer.line_count());
+                let line = self.engine.buffer.get_line(target);
                 let line_len = line.len();
                 let end_col = if line_len > 0 && line.ends_with('\n') {
                     line_len.saturating_sub(2)
                 } else {
                     line_len.saturating_sub(1)
                 };
-                self.state.cursor.line = target;
-                self.state.cursor.col = end_col;
+                self.engine.state.cursor.line = target;
+                self.engine.state.cursor.col = end_col;
                 self.needs_render = true;
             }
             KeyCode::Char('D') => {
@@ -177,9 +178,9 @@ impl Editor {
                 for _ in 0..count {
                     self.kill_line();
                 }
-                let prev_mode = self.state.mode;
-                self.state.mode = Mode::Insert;
-                self.plugin_manager.emit(PluginEvent::ModeChange {
+                let prev_mode = self.engine.state.mode;
+                self.engine.state.mode = Mode::Insert;
+                self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Insert,
                 });
@@ -187,12 +188,12 @@ impl Editor {
             }
             KeyCode::Char('S') => {
                 let _count = self.take_count();
-                let content = self.buffer.get_line(self.state.cursor.line);
-                self.register.set('"', &content);
-                self.buffer.delete_line(self.state.cursor.line);
-                let prev_mode = self.state.mode;
-                self.state.mode = Mode::Insert;
-                self.plugin_manager.emit(PluginEvent::ModeChange {
+                let content = self.engine.buffer.get_line(self.engine.state.cursor.line);
+                self.engine.register.set('"', &content);
+                self.engine.buffer.delete_line(self.engine.state.cursor.line);
+                let prev_mode = self.engine.state.mode;
+                self.engine.state.mode = Mode::Insert;
+                self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Insert,
                 });
@@ -218,11 +219,11 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('?') => {
-                let prev_mode = self.state.mode;
-                self.state.mode = Mode::Command;
-                self.state.command_buffer.clear();
-                self.state.command_buffer.push('?');
-                self.plugin_manager.emit(PluginEvent::ModeChange {
+                let prev_mode = self.engine.state.mode;
+                self.engine.state.mode = Mode::Command;
+                self.engine.state.command_buffer.clear();
+                self.engine.state.command_buffer.push('?');
+                self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Command,
                 });
@@ -232,11 +233,11 @@ impl Editor {
                 self.undo();
             }
             KeyCode::Char('r') => {
-                if self.state.command_buffer.is_empty() {
-                    let prev_mode = self.state.mode;
-                    self.state.mode = Mode::Replace;
-                    self.replace_char = None;
-                    self.plugin_manager.emit(PluginEvent::ModeChange {
+                if self.engine.state.command_buffer.is_empty() {
+                    let prev_mode = self.engine.state.mode;
+                    self.engine.state.mode = Mode::Replace;
+                    self.engine.operator_state.replace_char = None;
+                    self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                         from: prev_mode,
                         to: Mode::Replace,
                     });
@@ -244,46 +245,46 @@ impl Editor {
                 }
             }
             KeyCode::Char('R') => {
-                let prev_mode = self.state.mode;
-                self.state.mode = Mode::Replace;
-                self.replace_char = None;
-                self.plugin_manager.emit(PluginEvent::ModeChange {
+                let prev_mode = self.engine.state.mode;
+                self.engine.state.mode = Mode::Replace;
+                self.engine.operator_state.replace_char = None;
+                self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Replace,
                 });
                 self.needs_render = true;
             }
             KeyCode::Char('f') => {
-                if self.state.command_buffer.is_empty() {
-                    let register = self.pending_register.take();
-                    self.pending_op = PendingOperator::AwaitingOperator {
+                if self.engine.state.command_buffer.is_empty() {
+                    let register = self.engine.operator_state.register.take();
+                    self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                         op: Operator::FindCharForward,
                         register,
                     };
                 }
             }
             KeyCode::Char('F') => {
-                if self.state.command_buffer.is_empty() {
-                    let register = self.pending_register.take();
-                    self.pending_op = PendingOperator::AwaitingOperator {
+                if self.engine.state.command_buffer.is_empty() {
+                    let register = self.engine.operator_state.register.take();
+                    self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                         op: Operator::FindCharBackward,
                         register,
                     };
                 }
             }
             KeyCode::Char('t') => {
-                if self.state.command_buffer.is_empty() {
-                    let register = self.pending_register.take();
-                    self.pending_op = PendingOperator::AwaitingOperator {
+                if self.engine.state.command_buffer.is_empty() {
+                    let register = self.engine.operator_state.register.take();
+                    self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                         op: Operator::TillCharForward,
                         register,
                     };
                 }
             }
             KeyCode::Char('T') => {
-                if self.state.command_buffer.is_empty() {
-                    let register = self.pending_register.take();
-                    self.pending_op = PendingOperator::AwaitingOperator {
+                if self.engine.state.command_buffer.is_empty() {
+                    let register = self.engine.operator_state.register.take();
+                    self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                         op: Operator::TillCharBackward,
                         register,
                     };
@@ -300,37 +301,37 @@ impl Editor {
                 }
             }
             KeyCode::Char('v') => {
-                let prev_mode = self.state.mode;
-                self.state.mode = Mode::Visual;
-                self.state.visual_start = Some(self.state.cursor);
-                self.state.visual_type = Some(VisualType::Character);
-                self.plugin_manager.emit(PluginEvent::ModeChange {
+                let prev_mode = self.engine.state.mode;
+                self.engine.state.mode = Mode::Visual;
+                self.engine.state.visual_start = Some(self.engine.state.cursor);
+                self.engine.state.visual_type = Some(VisualType::Character);
+                self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Visual,
                 });
                 self.needs_render = true;
             }
             KeyCode::Char('V') => {
-                let prev_mode = self.state.mode;
-                self.state.mode = Mode::Visual;
-                self.state.visual_start = Some(self.state.cursor);
-                self.state.visual_type = Some(VisualType::Line);
-                self.plugin_manager.emit(PluginEvent::ModeChange {
+                let prev_mode = self.engine.state.mode;
+                self.engine.state.mode = Mode::Visual;
+                self.engine.state.visual_start = Some(self.engine.state.cursor);
+                self.engine.state.visual_type = Some(VisualType::Line);
+                self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                     from: prev_mode,
                     to: Mode::Visual,
                 });
                 self.needs_render = true;
             }
             KeyCode::Char('y') => {
-                let register = self.pending_register.take();
-                self.pending_op = PendingOperator::AwaitingOperator {
+                let register = self.engine.operator_state.register.take();
+                self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                     op: Operator::Yank,
                     register,
                 };
             }
             KeyCode::Char('d') => {
-                let register = self.pending_register.take();
-                self.pending_op = PendingOperator::AwaitingOperator {
+                let register = self.engine.operator_state.register.take();
+                self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                     op: Operator::Delete,
                     register,
                 };
@@ -342,27 +343,27 @@ impl Editor {
                 self.paste(true).await;
             }
             KeyCode::Char('"') => {
-                self.pending_register = Some('"');
+                self.engine.operator_state.register = Some('"');
             }
             KeyCode::Char('m') => {
-                self.pending_mark = Some('m');
+                self.engine.operator_state.mark = Some('m');
             }
             KeyCode::Char('`') => {
-                self.pending_mark = Some('`');
+                self.engine.operator_state.mark = Some('`');
             }
             KeyCode::Char('\'') => {
-                self.pending_mark = Some('\'');
+                self.engine.operator_state.mark = Some('\'');
             }
             KeyCode::Char('@') => {
-                self.pending_macro_play = Some('@');
+                self.engine.operator_state.macro_play = Some('@');
             }
             KeyCode::Char('q') => {
-                if self.state.command_buffer.is_empty() {
-                    if self.state.macros.is_recording() {
-                        self.state.macros.stop_recording();
+                if self.engine.state.command_buffer.is_empty() {
+                    if self.engine.state.macros.is_recording() {
+                        self.engine.state.macros.stop_recording();
                     } else {
-                        let register = self.pending_register.take();
-                        self.pending_op = PendingOperator::AwaitingOperator {
+                        let register = self.engine.operator_state.register.take();
+                        self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                             op: Operator::RecordMacro,
                             register,
                         };
@@ -372,20 +373,20 @@ impl Editor {
             _ => {
                 match key {
                     KeyCode::Char('g') => {
-                        let register = self.pending_register.take();
-                        self.pending_op = PendingOperator::AwaitingOperator {
+                        let register = self.engine.operator_state.register.take();
+                        self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                             op: Operator::Goto,
                             register,
                         };
                     }
                     KeyCode::Char('G') => {
-                        let target = match self.pending_count.take() {
-                            Some(c) => c.min(self.buffer.line_count()).max(1),
-                            None => self.buffer.line_count().max(1),
+                        let target = match self.engine.operator_state.count.take() {
+                            Some(c) => c.min(self.engine.buffer.line_count()).max(1),
+                            None => self.engine.buffer.line_count().max(1),
                         };
-                        self.state.cursor.line = target;
-                        let len = self.buffer.get_line(target).len();
-                        self.state.cursor.col = len.saturating_sub(1);
+                        self.engine.state.cursor.line = target;
+                        let len = self.engine.buffer.get_line(target).len();
+                        self.engine.state.cursor.col = len.saturating_sub(1);
                         self.needs_render = true;
                     }
                     KeyCode::Char('%') => {
@@ -437,8 +438,8 @@ impl Editor {
                         self.needs_render = true;
                     }
                     KeyCode::Char('c') => {
-                        let register = self.pending_register.take();
-                        self.pending_op = PendingOperator::AwaitingOperator {
+                        let register = self.engine.operator_state.register.take();
+                        self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                             op: Operator::Change,
                             register,
                         };
@@ -451,29 +452,29 @@ impl Editor {
                         self.needs_render = true;
                     }
                     KeyCode::Char('>') => {
-                        let register = self.pending_register.take();
-                        self.pending_op = PendingOperator::AwaitingOperator {
+                        let register = self.engine.operator_state.register.take();
+                        self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                             op: Operator::IndentRight,
                             register,
                         };
                     }
                     KeyCode::Char('<') => {
-                        let register = self.pending_register.take();
-                        self.pending_op = PendingOperator::AwaitingOperator {
+                        let register = self.engine.operator_state.register.take();
+                        self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                             op: Operator::IndentLeft,
                             register,
                         };
                     }
                     KeyCode::Char('z') => {
-                        let register = self.pending_register.take();
-                        self.pending_op = PendingOperator::AwaitingOperator {
+                        let register = self.engine.operator_state.register.take();
+                        self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                             op: Operator::Scroll,
                             register,
                         };
                     }
                     KeyCode::Char('Z') => {
-                        let register = self.pending_register.take();
-                        self.pending_op = PendingOperator::AwaitingOperator {
+                        let register = self.engine.operator_state.register.take();
+                        self.engine.operator_state.pending = PendingOperator::AwaitingOperator {
                             op: Operator::SaveQuit,
                             register,
                         };
@@ -481,9 +482,9 @@ impl Editor {
                     KeyCode::Char('s') => {
                         let _count = self.take_count();
                         self.delete_char('"');
-                        let prev_mode = self.state.mode;
-                        self.state.mode = Mode::Insert;
-                        self.plugin_manager.emit(PluginEvent::ModeChange {
+                        let prev_mode = self.engine.state.mode;
+                        self.engine.state.mode = Mode::Insert;
+                        self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                             from: prev_mode,
                             to: Mode::Insert,
                         });
@@ -492,46 +493,46 @@ impl Editor {
                     _ => {}
                 }
 
-                if let Some(_pending) = self.pending_macro_play {
+                if let Some(_pending) = self.engine.operator_state.macro_play {
                     if let KeyCode::Char(c) = key {
                         if c.is_ascii_lowercase() {
                             self.play_macro(c);
-                            self.pending_macro_play = None;
+                            self.engine.operator_state.macro_play = None;
                             self.needs_render = true;
                             return;
                         }
                     }
-                    self.pending_macro_play = None;
+                    self.engine.operator_state.macro_play = None;
                 }
-                if let Some(pending) = self.pending_mark {
+                if let Some(pending) = self.engine.operator_state.mark {
                     if let KeyCode::Char(c) = key {
                         if (pending == 'm' && c.is_ascii_lowercase())
                             || (pending == '`' || pending == '\'')
                         {
                             self.handle_mark(pending, c);
-                            self.pending_mark = None;
+                            self.engine.operator_state.mark = None;
                             self.needs_render = true;
                             return;
                         }
                     }
-                    self.pending_mark = None;
+                    self.engine.operator_state.mark = None;
                 }
-                if let Some(_pending_reg) = self.pending_register {
+                if let Some(_pending_reg) = self.engine.operator_state.register {
                     if let KeyCode::Char(c) = key {
                         if c.is_ascii_lowercase() {
-                            self.pending_register = Some(c);
+                            self.engine.operator_state.register = Some(c);
                             return;
                         }
                     }
-                    self.pending_register = None;
+                    self.engine.operator_state.register = None;
                 }
             }
         }
     }
 
     pub(crate) async fn handle_operator(&mut self, op: Operator, key: KeyCode, count: usize) {
-        let register = self.pending_register.unwrap_or('"');
-        self.pending_register = None;
+        let register = self.engine.operator_state.register.unwrap_or('"');
+        self.engine.operator_state.register = None;
 
         match op {
             Operator::Yank => match key {
@@ -547,14 +548,14 @@ impl Editor {
                     self.yank_word_end(register);
                 }
                 KeyCode::Char('i') => {
-                    self.pending_op = PendingOperator::AwaitingTextObject {
+                    self.engine.operator_state.pending = PendingOperator::AwaitingTextObject {
                         op: Operator::Yank,
                         register,
                         inner: true,
                     };
                 }
                 KeyCode::Char('a') => {
-                    self.pending_op = PendingOperator::AwaitingTextObject {
+                    self.engine.operator_state.pending = PendingOperator::AwaitingTextObject {
                         op: Operator::Yank,
                         register,
                         inner: false,
@@ -572,14 +573,14 @@ impl Editor {
                     self.delete_word(register);
                 }
                 KeyCode::Char('i') => {
-                    self.pending_op = PendingOperator::AwaitingTextObject {
+                    self.engine.operator_state.pending = PendingOperator::AwaitingTextObject {
                         op: Operator::Delete,
                         register,
                         inner: true,
                     };
                 }
                 KeyCode::Char('a') => {
-                    self.pending_op = PendingOperator::AwaitingTextObject {
+                    self.engine.operator_state.pending = PendingOperator::AwaitingTextObject {
                         op: Operator::Delete,
                         register,
                         inner: false,
@@ -590,62 +591,62 @@ impl Editor {
             Operator::Change => match key {
                 KeyCode::Char('c') => {
                     for _ in 0..count {
-                        let content = self.buffer.get_line(self.state.cursor.line);
-                        self.register.set(register, &content);
-                        self.buffer.delete_line(self.state.cursor.line);
+                        let content = self.engine.buffer.get_line(self.engine.state.cursor.line);
+                        self.engine.register.set(register, &content);
+                        self.engine.buffer.delete_line(self.engine.state.cursor.line);
                     }
-                    let prev_mode = self.state.mode;
-                    self.state.mode = Mode::Insert;
-                    self.plugin_manager.emit(PluginEvent::ModeChange {
+                    let prev_mode = self.engine.state.mode;
+                    self.engine.state.mode = Mode::Insert;
+                    self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                         from: prev_mode,
                         to: Mode::Insert,
                     });
-                    self.dot_last_action = Some(DotAction::Change {
+                    self.engine.dot_last_action = Some(DotAction::Change {
                         text: String::new(),
-                        line: self.state.cursor.line,
+                        line: self.engine.state.cursor.line,
                         col: 0,
                     });
                     self.on_buffer_modified();
                 }
                 KeyCode::Char('w') => {
-                    let (word, start, _) = self
+                    let (word, start, _) = self.engine
                         .buffer
-                        .get_word_range(self.state.cursor.line, self.state.cursor.col);
+                        .get_word_range(self.engine.state.cursor.line, self.engine.state.cursor.col);
                     if !word.is_empty() {
                         let char_start =
-                            self.buffer.line_to_char(self.state.cursor.line - 1) + start;
+                            self.engine.buffer.line_to_char(self.engine.state.cursor.line - 1) + start;
                         let char_end = char_start + word.len();
-                        let content = self.buffer.get_char_range(
-                            self.state.cursor.line,
+                        let content = self.engine.buffer.get_char_range(
+                            self.engine.state.cursor.line,
                             start,
-                            self.state.cursor.line,
+                            self.engine.state.cursor.line,
                             start + word.len(),
                         );
-                        self.register.set(register, &content);
-                        self.buffer.remove_range(char_start, char_end);
-                        let prev_mode = self.state.mode;
-                        self.state.mode = Mode::Insert;
-                        self.plugin_manager.emit(PluginEvent::ModeChange {
+                        self.engine.register.set(register, &content);
+                        self.engine.buffer.remove_range(char_start, char_end);
+                        let prev_mode = self.engine.state.mode;
+                        self.engine.state.mode = Mode::Insert;
+                        self.engine.plugin_manager.emit(PluginEvent::ModeChange {
                             from: prev_mode,
                             to: Mode::Insert,
                         });
-                        self.dot_last_action = Some(DotAction::Change {
+                        self.engine.dot_last_action = Some(DotAction::Change {
                             text: content,
-                            line: self.state.cursor.line,
+                            line: self.engine.state.cursor.line,
                             col: start,
                         });
                         self.on_buffer_modified();
                     }
                 }
                 KeyCode::Char('i') => {
-                    self.pending_op = PendingOperator::AwaitingTextObject {
+                    self.engine.operator_state.pending = PendingOperator::AwaitingTextObject {
                         op: Operator::Change,
                         register,
                         inner: true,
                     };
                 }
                 KeyCode::Char('a') => {
-                    self.pending_op = PendingOperator::AwaitingTextObject {
+                    self.engine.operator_state.pending = PendingOperator::AwaitingTextObject {
                         op: Operator::Change,
                         register,
                         inner: false,
@@ -669,8 +670,8 @@ impl Editor {
             }
             Operator::FindCharForward => {
                 if let KeyCode::Char(ch) = key {
-                    self.last_fchar = Some(ch);
-                    self.last_fchar_till = false;
+                    self.engine.search_state.last_fchar = Some(ch);
+                    self.engine.search_state.last_fchar_till = false;
                     if self.find_char(ch, false, true) {
                         self.needs_render = true;
                     }
@@ -678,8 +679,8 @@ impl Editor {
             }
             Operator::FindCharBackward => {
                 if let KeyCode::Char(ch) = key {
-                    self.last_fchar = Some(ch);
-                    self.last_fchar_till = false;
+                    self.engine.search_state.last_fchar = Some(ch);
+                    self.engine.search_state.last_fchar_till = false;
                     if self.find_char(ch, false, false) {
                         self.needs_render = true;
                     }
@@ -687,8 +688,8 @@ impl Editor {
             }
             Operator::TillCharForward => {
                 if let KeyCode::Char(ch) = key {
-                    self.last_fchar = Some(ch);
-                    self.last_fchar_till = true;
+                    self.engine.search_state.last_fchar = Some(ch);
+                    self.engine.search_state.last_fchar_till = true;
                     if self.find_char(ch, true, true) {
                         self.needs_render = true;
                     }
@@ -696,8 +697,8 @@ impl Editor {
             }
             Operator::TillCharBackward => {
                 if let KeyCode::Char(ch) = key {
-                    self.last_fchar = Some(ch);
-                    self.last_fchar_till = true;
+                    self.engine.search_state.last_fchar = Some(ch);
+                    self.engine.search_state.last_fchar_till = true;
                     if self.find_char(ch, true, false) {
                         self.needs_render = true;
                     }
@@ -706,14 +707,14 @@ impl Editor {
             Operator::RecordMacro => {
                 if let KeyCode::Char(c) = key {
                     if c.is_ascii_lowercase() {
-                        self.state.macros.start_recording(c);
+                        self.engine.state.macros.start_recording(c);
                     }
                 }
             }
             Operator::Goto => {
                 if let KeyCode::Char('g') = key {
-                    self.state.cursor.line = 1;
-                    self.state.cursor.col = 0;
+                    self.engine.state.cursor.line = 1;
+                    self.engine.state.cursor.col = 0;
                     self.needs_render = true;
                 }
             }
@@ -735,7 +736,7 @@ impl Editor {
             Operator::SaveQuit => {
                 if let KeyCode::Char('Z') = key {
                     self.save_file_async().await;
-                    if !self.buffer.is_dirty() {
+                    if !self.engine.buffer.is_dirty() {
                         self.running = false;
                     }
                 }
@@ -745,24 +746,24 @@ impl Editor {
     }
 
     fn yank_line(&mut self, register: char) {
-        let line = self.state.cursor.line;
-        let content = self.buffer.get_line_range(line, line);
-        self.register.set(register, &content);
+        let line = self.engine.state.cursor.line;
+        let content = self.engine.buffer.get_line_range(line, line);
+        self.engine.register.set(register, &content);
         self.needs_render = true;
     }
 
     fn yank_word(&mut self, register: char) {
-        let (word, _, _) = self
+        let (word, _, _) = self.engine
             .buffer
-            .get_word_range(self.state.cursor.line, self.state.cursor.col);
-        self.register.set(register, &word);
+            .get_word_range(self.engine.state.cursor.line, self.engine.state.cursor.col);
+        self.engine.register.set(register, &word);
         self.needs_render = true;
     }
 
     fn yank_word_end(&mut self, register: char) {
-        let line = self.state.cursor.line;
-        let col = self.state.cursor.col;
-        let line_str = self.buffer.get_line(line);
+        let line = self.engine.state.cursor.line;
+        let col = self.engine.state.cursor.col;
+        let line_str = self.engine.buffer.get_line(line);
         let chars: Vec<char> = line_str.chars().collect();
 
         let mut end = col;
@@ -771,50 +772,50 @@ impl Editor {
         }
 
         let word: String = chars[col..end].iter().collect();
-        self.register.set(register, &word);
+        self.engine.register.set(register, &word);
         self.needs_render = true;
     }
 
     fn delete_line(&mut self, register: char) {
-        let line = self.state.cursor.line;
-        let mod_count = self.buffer.modification_count();
-        let content = self.buffer.delete_line(line);
-        self.register.set(register, &content);
+        let line = self.engine.state.cursor.line;
+        let mod_count = self.engine.buffer.modification_count();
+        let content = self.engine.buffer.delete_line(line);
+        self.engine.register.set(register, &content);
 
-        self.undo_manager.push(Edit {
+        self.engine.undo_manager.push(Edit {
             edit_type: EditType::DeleteLine {
                 line,
                 text: content.clone(),
             },
-            cursor_before: self.state.cursor,
-            cursor_after: self.state.cursor,
+            cursor_before: self.engine.state.cursor,
+            cursor_after: self.engine.state.cursor,
             modification_count: mod_count,
         });
 
-        let line_count = self.buffer.line_count();
+        let line_count = self.engine.buffer.line_count();
         if line > line_count {
-            self.state.cursor.line = line_count.max(1);
+            self.engine.state.cursor.line = line_count.max(1);
         }
-        let len = self.buffer.get_line(self.state.cursor.line).len();
-        self.state.cursor.col = self.state.cursor.col.min(len.saturating_sub(1));
+        let len = self.engine.buffer.get_line(self.engine.state.cursor.line).len();
+        self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
         self.on_buffer_modified();
     }
 
     fn delete_word(&mut self, register: char) {
-        let (word, start, _) = self
+        let (word, start, _) = self.engine
             .buffer
-            .get_word_range(self.state.cursor.line, self.state.cursor.col);
+            .get_word_range(self.engine.state.cursor.line, self.engine.state.cursor.col);
         if !word.is_empty() {
-            let char_start = self.buffer.line_to_char(self.state.cursor.line - 1) + start;
+            let char_start = self.engine.buffer.line_to_char(self.engine.state.cursor.line - 1) + start;
             let char_end = char_start + word.len();
-            self.buffer.remove_range(char_start, char_end);
-            self.register.set(register, &word);
+            self.engine.buffer.remove_range(char_start, char_end);
+            self.engine.register.set(register, &word);
         }
         self.needs_render = true;
     }
 
     async fn paste(&mut self, before: bool) {
-        let content = self.register.get_default();
+        let content = self.engine.register.get_default();
         if content.is_empty() {
             return;
         }
@@ -824,42 +825,42 @@ impl Editor {
             for (i, line) in lines.iter().enumerate() {
                 if i == 0 {
                     if before {
-                        self.buffer.insert(self.state.cursor.line, 0, line);
-                        self.buffer.insert(self.state.cursor.line, line.len(), "\n");
+                        self.engine.buffer.insert(self.engine.state.cursor.line, 0, line);
+                        self.engine.buffer.insert(self.engine.state.cursor.line, line.len(), "\n");
                     } else {
-                        self.buffer
-                            .insert(self.state.cursor.line, self.state.cursor.col, line);
-                        self.buffer.insert(
-                            self.state.cursor.line,
-                            self.state.cursor.col + line.len(),
+                        self.engine.buffer
+                            .insert(self.engine.state.cursor.line, self.engine.state.cursor.col, line);
+                        self.engine.buffer.insert(
+                            self.engine.state.cursor.line,
+                            self.engine.state.cursor.col + line.len(),
                             "\n",
                         );
                     }
                 } else {
-                    let insert_line = self.state.cursor.line + i;
-                    self.buffer.insert(insert_line, 0, line);
-                    self.buffer.insert(insert_line, line.len(), "\n");
+                    let insert_line = self.engine.state.cursor.line + i;
+                    self.engine.buffer.insert(insert_line, 0, line);
+                    self.engine.buffer.insert(insert_line, line.len(), "\n");
                 }
             }
             if before {
-                self.state.cursor.line += lines.len() - 1;
-                self.state.cursor.col = lines.last().map(|l| l.len()).unwrap_or(0);
+                self.engine.state.cursor.line += lines.len() - 1;
+                self.engine.state.cursor.col = lines.last().map(|l| l.len()).unwrap_or(0);
             } else {
-                self.state.cursor.line += lines.len() - 1;
+                self.engine.state.cursor.line += lines.len() - 1;
                 let last_line = lines.last().unwrap();
-                self.state.cursor.col = last_line.len();
+                self.engine.state.cursor.col = last_line.len();
             }
         } else {
             if before {
-                self.buffer
-                    .insert(self.state.cursor.line, self.state.cursor.col, &content);
+                self.engine.buffer
+                    .insert(self.engine.state.cursor.line, self.engine.state.cursor.col, &content);
             } else {
-                self.buffer
-                    .insert(self.state.cursor.line, self.state.cursor.col + 1, &content);
-                self.state.cursor.col += 1;
+                self.engine.buffer
+                    .insert(self.engine.state.cursor.line, self.engine.state.cursor.col + 1, &content);
+                self.engine.state.cursor.col += 1;
             }
             if !before {
-                self.state.cursor.col += content.len();
+                self.engine.state.cursor.col += content.len();
             }
         }
 
@@ -867,19 +868,19 @@ impl Editor {
     }
 
     fn delete_char(&mut self, _register: char) {
-        let line = self.state.cursor.line;
-        let col = self.state.cursor.col;
-        let line_str = self.buffer.get_line(line);
+        let line = self.engine.state.cursor.line;
+        let col = self.engine.state.cursor.col;
+        let line_str = self.engine.buffer.get_line(line);
 
         if col >= line_str.len() {
-            if line < self.buffer.line_count() {
-                self.buffer.merge_with_prev_line(line + 1);
+            if line < self.engine.buffer.line_count() {
+                self.engine.buffer.merge_with_prev_line(line + 1);
             }
         } else {
-            self.buffer.delete(line, col);
+            self.engine.buffer.delete(line, col);
         }
 
-        self.dot_last_action = Some(DotAction::Delete {
+        self.engine.dot_last_action = Some(DotAction::Delete {
             text: String::new(),
             line,
             col,
@@ -888,26 +889,26 @@ impl Editor {
     }
 
     async fn repeat_last_action(&mut self) {
-        if let Some(action) = &self.dot_last_action {
+        if let Some(action) = &self.engine.dot_last_action {
             match action.clone() {
                 DotAction::Insert { text } => {
                     for ch in text.chars() {
-                        self.buffer
-                            .insert_char(self.state.cursor.line, self.state.cursor.col, ch);
-                        self.state.cursor.col += 1;
+                        self.engine.buffer
+                            .insert_char(self.engine.state.cursor.line, self.engine.state.cursor.col, ch);
+                        self.engine.state.cursor.col += 1;
                     }
                     self.on_buffer_modified();
                 }
                 DotAction::Delete { text, line, col } => {
                     if !text.is_empty() {
-                        self.buffer.insert(line, col, &text);
+                        self.engine.buffer.insert(line, col, &text);
                         self.on_buffer_modified();
                     }
                 }
                 DotAction::Change { text, line, col } => {
-                    self.buffer.insert(line, col, &text);
-                    self.state.cursor.line = line;
-                    self.state.cursor.col = col;
+                    self.engine.buffer.insert(line, col, &text);
+                    self.engine.state.cursor.line = line;
+                    self.engine.state.cursor.col = col;
                     self.on_buffer_modified();
                 }
             }
@@ -915,55 +916,55 @@ impl Editor {
     }
 
     pub(crate) fn open_line(&mut self, above: bool) {
-        let line = self.state.cursor.line;
+        let line = self.engine.state.cursor.line;
 
         if above {
-            self.buffer.insert(line, 0, "\n");
-            self.state.cursor.line = line;
+            self.engine.buffer.insert(line, 0, "\n");
+            self.engine.state.cursor.line = line;
         } else {
-            self.buffer.insert(line + 1, 0, "\n");
-            self.state.cursor.line = line + 1;
+            self.engine.buffer.insert(line + 1, 0, "\n");
+            self.engine.state.cursor.line = line + 1;
         }
-        self.state.cursor.col = 0;
+        self.engine.state.cursor.col = 0;
 
-        let prev_mode = self.state.mode;
-        self.state.mode = Mode::Insert;
-        self.plugin_manager.emit(PluginEvent::ModeChange {
+        let prev_mode = self.engine.state.mode;
+        self.engine.state.mode = Mode::Insert;
+        self.engine.plugin_manager.emit(PluginEvent::ModeChange {
             from: prev_mode,
             to: Mode::Insert,
         });
 
-        self.dot_last_action = Some(DotAction::Insert {
+        self.engine.dot_last_action = Some(DotAction::Insert {
             text: String::new(),
         });
         self.on_buffer_modified();
     }
 
     pub(crate) fn join_lines(&mut self) {
-        let line = self.state.cursor.line;
-        if line >= self.buffer.line_count() {
+        let line = self.engine.state.cursor.line;
+        if line >= self.engine.buffer.line_count() {
             return;
         }
 
-        let current_line = self.buffer.get_line(line);
+        let current_line = self.engine.buffer.get_line(line);
         let current_stripped = current_line.trim_end_matches('\n');
-        let next_line = self.buffer.get_line(line + 1);
+        let next_line = self.engine.buffer.get_line(line + 1);
         let next_stripped = next_line.trim_end_matches('\n');
 
-        let join_pos = self.buffer.merge_with_prev_line(line + 1);
+        let join_pos = self.engine.buffer.merge_with_prev_line(line + 1);
 
         let needs_space = !current_stripped.ends_with(' ')
             && !current_stripped.ends_with('\t')
             && !next_stripped.starts_with(' ')
             && !next_stripped.is_empty();
         if needs_space {
-            self.buffer.insert(line, join_pos, " ");
-            self.state.cursor.col = join_pos + 1;
+            self.engine.buffer.insert(line, join_pos, " ");
+            self.engine.state.cursor.col = join_pos + 1;
         } else {
-            self.state.cursor.col = join_pos;
+            self.engine.state.cursor.col = join_pos;
         }
 
-        self.dot_last_action = Some(DotAction::Change {
+        self.engine.dot_last_action = Some(DotAction::Change {
             text: String::new(),
             line,
             col: 0,

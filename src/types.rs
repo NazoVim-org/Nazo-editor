@@ -102,7 +102,7 @@ pub struct SearchResult {
     pub start_col: usize,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchDirection {
     Forward,
     Backward,
@@ -281,4 +281,92 @@ impl EditorState {
     pub fn clear_message(&mut self) {
         self.last_message = None;
     }
+}
+
+/// Cyclic kill-ring: holds Emacs kill history entries.
+/// - push(): insert newest entry at front (up to MAX_ENTRIES)
+/// - yank(): get the newest entry
+/// - yank_pop(): cycle to the previous entry (for future M-y)
+#[derive(Clone)]
+pub struct KillRing {
+    entries: Vec<String>,
+    index: usize,
+    max_entries: usize,
+}
+
+impl KillRing {
+    const MAX_ENTRIES: usize = 60;
+
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::with_capacity(Self::MAX_ENTRIES),
+            index: 0,
+            max_entries: Self::MAX_ENTRIES,
+        }
+    }
+
+    pub fn push(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        if self.entries.len() >= self.max_entries {
+            self.entries.pop();
+        }
+        self.entries.insert(0, text.to_string());
+        self.index = 0;
+    }
+
+    pub fn yank(&self) -> Option<&str> {
+        self.entries.first().map(|s| s.as_str())
+    }
+
+    /// Return the entry at the current index (for yank-pop cycling).
+    pub fn current_yank(&self) -> Option<&str> {
+        self.entries.get(self.index).map(|s| s.as_str())
+    }
+
+    /// Advance the index and return the next entry (yank-pop forward).
+    pub fn yank_pop(&mut self) -> Option<&str> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        self.index = (self.index + 1) % self.entries.len();
+        self.entries.get(self.index).map(|s| s.as_str())
+    }
+
+    pub fn reset_index(&mut self) {
+        self.index = 0;
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+impl Default for KillRing {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Action that can be repeated with `.` in Vim normal mode.
+#[derive(Clone)]
+pub enum DotAction {
+    Insert {
+        text: String,
+    },
+    Delete {
+        text: String,
+        line: usize,
+        col: usize,
+    },
+    Change {
+        text: String,
+        line: usize,
+        col: usize,
+    },
 }

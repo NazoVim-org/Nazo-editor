@@ -306,7 +306,7 @@ async fn vim_w_word_forward() {
 #[tokio::test]
 async fn vim_b_word_backward() {
     let mut ed = test_vim_editor("hello world\n");
-    ed.state.cursor.col = 8;
+    ed.engine.state.cursor.col = 8;
     ed.handle_key_for_test(KeyCode::Char('b'), KeyModifiers::NONE)
         .await;
     let (_, _, col, _) = ed.snapshot_for_test();
@@ -334,7 +334,7 @@ async fn vim_dollar_moves_to_line_end() {
 #[tokio::test]
 async fn vim_zero_moves_to_column_zero() {
     let mut ed = test_vim_editor("hello\n");
-    ed.state.cursor.col = 3;
+    ed.engine.state.cursor.col = 3;
     ed.handle_key_for_test(KeyCode::Char('0'), KeyModifiers::NONE)
         .await;
     assert_eq!(ed.snapshot_for_test().2, 0);
@@ -348,7 +348,7 @@ async fn vim_visual_line_yank() {
     // V → visual line
     ed.handle_key_for_test(KeyCode::Char('V'), KeyModifiers::NONE)
         .await;
-    assert_eq!(ed.state.mode, Mode::Visual);
+    assert_eq!(ed.engine.state.mode, Mode::Visual);
     // y → yank
     ed.handle_key_for_test(KeyCode::Char('y'), KeyModifiers::NONE)
         .await;
@@ -377,11 +377,11 @@ async fn vim_visual_line_delete() {
 #[tokio::test]
 async fn vim_capital_c_deletes_to_end_and_inserts() {
     let mut ed = test_vim_editor("hello world\n");
-    ed.state.cursor.col = 5;
+    ed.engine.state.cursor.col = 5;
     ed.handle_key_for_test(KeyCode::Char('C'), KeyModifiers::NONE)
         .await;
-    assert_eq!(ed.state.mode, Mode::Insert);
-    let line = ed.buffer.get_line(1);
+    assert_eq!(ed.engine.state.mode, Mode::Insert);
+    let line = ed.engine.buffer.get_line(1);
     assert_eq!(line, "hello\n", "C deleted from col 5 to end");
 }
 
@@ -390,8 +390,8 @@ async fn vim_capital_s_substitutes_line() {
     let mut ed = test_vim_editor("hello\n");
     ed.handle_key_for_test(KeyCode::Char('S'), KeyModifiers::NONE)
         .await;
-    assert_eq!(ed.state.mode, Mode::Insert);
-    let line = ed.buffer.get_line(1);
+    assert_eq!(ed.engine.state.mode, Mode::Insert);
+    let line = ed.engine.buffer.get_line(1);
     assert_eq!(line, "\n", "S cleared the line");
 }
 
@@ -400,7 +400,7 @@ async fn vim_s_substitutes_char() {
     let mut ed = test_vim_editor("hello\n");
     ed.handle_key_for_test(KeyCode::Char('s'), KeyModifiers::NONE)
         .await;
-    assert_eq!(ed.state.mode, Mode::Insert);
+    assert_eq!(ed.engine.state.mode, Mode::Insert);
     let (buf, _, _, _) = ed.snapshot_for_test();
     assert_eq!(buf, "ello\n", "s deleted first char");
 }
@@ -410,10 +410,10 @@ async fn vim_s_substitutes_char() {
 #[tokio::test]
 async fn vim_capital_d_deletes_to_end() {
     let mut ed = test_vim_editor("hello world\n");
-    ed.state.cursor.col = 5;
+    ed.engine.state.cursor.col = 5;
     ed.handle_key_for_test(KeyCode::Char('D'), KeyModifiers::NONE)
         .await;
-    let line = ed.buffer.get_line(1);
+    let line = ed.engine.buffer.get_line(1);
     assert_eq!(line, "hello\n", "D deleted ' world'");
 }
 
@@ -489,7 +489,7 @@ async fn vim_percent_matching_bracket() {
 #[tokio::test]
 async fn vim_gg_goes_to_first_line() {
     let mut ed = test_vim_editor("a\nb\nc\n");
-    ed.state.cursor.line = 3;
+    ed.engine.state.cursor.line = 3;
     // gg
     ed.handle_key_for_test(KeyCode::Char('g'), KeyModifiers::NONE)
         .await;
@@ -517,9 +517,9 @@ async fn vim_g_with_count_goes_to_line() {
 #[tokio::test]
 async fn vim_zz_save_and_quit_clean_file() {
     let mut ed = test_vim_editor("hello\n");
-    ed.state.file_path = Some(std::path::PathBuf::from("/tmp/zz_test.txt"));
+    ed.engine.state.file_path = Some(std::path::PathBuf::from("/tmp/zz_test.txt"));
     // Make buffer not dirty
-    ed.buffer.reset_clean_state();
+    ed.engine.buffer.reset_clean_state();
     // ZZ
     ed.handle_key_for_test(KeyCode::Char('Z'), KeyModifiers::NONE)
         .await;
@@ -566,7 +566,7 @@ async fn vim_indent_right_shift() {
         .await;
     ed.handle_key_for_test(KeyCode::Char('>'), KeyModifiers::NONE)
         .await;
-    let line = ed.buffer.get_line(1);
+    let line = ed.engine.buffer.get_line(1);
     assert!(line.starts_with('\t'), ">> indented with tab");
 }
 
@@ -597,8 +597,8 @@ async fn vim_question_mark_enters_backward_search() {
     let mut ed = test_vim_editor("hello world\n");
     ed.handle_key_for_test(KeyCode::Char('?'), KeyModifiers::NONE)
         .await;
-    assert_eq!(ed.state.mode, Mode::Command);
-    assert_eq!(ed.state.command_buffer, "?");
+    assert_eq!(ed.engine.state.mode, Mode::Command);
+    assert_eq!(ed.engine.state.command_buffer, "?");
 }
 
 // ── Emacs M-f / M-b word movement ──────────────────────────
@@ -618,7 +618,7 @@ async fn emacs_meta_f_moves_word_forward() {
 async fn emacs_meta_b_moves_word_backward() {
     let mut ed = Editor::new_headless_for_test(Keymap::Emacs).expect("headless");
     ed.set_buffer_for_test("hello world\n");
-    ed.state.cursor.col = 8;
+    ed.engine.state.cursor.col = 8;
     // M-b
     ed.handle_key_for_test(KeyCode::Char('b'), KeyModifiers::ALT)
         .await;
@@ -632,10 +632,10 @@ async fn emacs_meta_b_moves_word_backward() {
 async fn emacs_ctrl_t_transpose_chars() {
     let mut ed = Editor::new_headless_for_test(Keymap::Emacs).expect("headless");
     ed.set_buffer_for_test("hello\n");
-    ed.state.cursor.col = 2; // at 'e' and 'l' (col 2 → between 'e' and 'l')
+    ed.engine.state.cursor.col = 2; // at 'e' and 'l' (col 2 → between 'e' and 'l')
                              // Actually transpose swaps chars before and at cursor
                              // Cursor at col 1: swaps 'h'(0) and 'e'(1)
-    ed.state.cursor.col = 1;
+    ed.engine.state.cursor.col = 1;
     ed.handle_key_for_test(KeyCode::Char('t'), KeyModifiers::CONTROL)
         .await;
     let (buf, _, col, _) = ed.snapshot_for_test();
@@ -648,13 +648,13 @@ async fn emacs_ctrl_t_transpose_chars() {
 #[tokio::test]
 async fn emacs_ctrl_g_aborts_command_mode() {
     let mut ed = Editor::new_headless_for_test(Keymap::Emacs).expect("headless");
-    ed.state.mode = Mode::Command;
-    ed.state.command_buffer = "/search".to_string();
+    ed.engine.state.mode = Mode::Command;
+    ed.engine.state.command_buffer = "/search".to_string();
     ed.handle_key_for_test(KeyCode::Char('g'), KeyModifiers::CONTROL)
         .await;
-    assert_eq!(ed.state.mode, Mode::Normal);
+    assert_eq!(ed.engine.state.mode, Mode::Normal);
     assert!(
-        ed.state.command_buffer.is_empty(),
+        ed.engine.state.command_buffer.is_empty(),
         "C-g cleared command buffer"
     );
 }
@@ -666,7 +666,7 @@ async fn emacs_ctrl_x_u_redo() {
     let mut ed = Editor::new_headless_for_test(Keymap::Emacs).expect("headless");
     ed.set_buffer_for_test("hello world\n");
     // Make a change, undo it, then C-x u redo
-    ed.state.cursor.col = 5;
+    ed.engine.state.cursor.col = 5;
     ed.handle_key_for_test(KeyCode::Char('d'), KeyModifiers::CONTROL)
         .await;
     let (buf, _, _, _) = ed.snapshot_for_test();
@@ -700,7 +700,7 @@ async fn emacs_ctrl_y_yanks_from_kill_ring() {
     assert_eq!(buf, "\n", "C-k killed line content");
 
     // Yank back at start
-    ed.state.cursor.col = 0;
+    ed.engine.state.cursor.col = 0;
     ed.handle_key_for_test(KeyCode::Char('y'), KeyModifiers::CONTROL)
         .await;
     let (buf, _, _, _) = ed.snapshot_for_test();
@@ -744,7 +744,7 @@ async fn emacs_meta_w_copies_region() {
     let (buf, _, _, _) = ed.snapshot_for_test();
     assert_eq!(buf, "hello world\n", "M-w did not change buffer");
     // kill-ring should have "hello" (checked via yank after)
-    ed.state.cursor.col = 0;
+    ed.engine.state.cursor.col = 0;
     ed.handle_key_for_test(KeyCode::Char('y'), KeyModifiers::CONTROL)
         .await;
     let (buf2, _, _, _) = ed.snapshot_for_test();
@@ -756,15 +756,15 @@ async fn emacs_meta_w_copies_region() {
 #[tokio::test]
 async fn switch_from_vim_to_emacs_and_back() {
     let mut ed = test_vim_editor("hello world\n");
-    assert!(matches!(ed.state.mode, Mode::Normal));
+    assert!(matches!(ed.engine.state.mode, Mode::Normal));
 
     // Switch to Emacs
     ed.switch_keymap("emacs");
     // In Emacs mode, M-f should move word forward (not insert 'f')
-    let col_before = ed.state.cursor.col;
+    let col_before = ed.engine.state.cursor.col;
     ed.handle_key_for_test(KeyCode::Char('f'), KeyModifiers::ALT)
         .await;
-    let col_after = ed.state.cursor.col;
+    let col_after = ed.engine.state.cursor.col;
     assert!(
         col_after > col_before,
         "M-f moved cursor forward after emacs switch"
@@ -774,7 +774,7 @@ async fn switch_from_vim_to_emacs_and_back() {
 
     // Switch back to Vim
     ed.switch_keymap("vim");
-    ed.state.cursor.col = 0;
+    ed.engine.state.cursor.col = 0;
     // Vim: 'x' should delete a character
     ed.handle_key_for_test(KeyCode::Char('x'), KeyModifiers::NONE)
         .await;
@@ -790,12 +790,12 @@ async fn switch_keymap_resets_pending_state() {
         .await;
     // Switch keymap mid-command — should reset pending count
     ed.switch_keymap("emacs");
-    assert!(ed.pending_count.is_none(), "pending_count cleared");
+    assert!(ed.engine.operator_state.count.is_none(), "pending_count cleared");
     assert!(
-        matches!(ed.pending_op, PendingOperator::Idle),
+        matches!(ed.engine.operator_state.pending, PendingOperator::Idle),
         "command_state reset"
     );
-    assert_eq!(ed.state.mode, Mode::Normal);
+    assert_eq!(ed.engine.state.mode, Mode::Normal);
 }
 
 #[tokio::test]
@@ -812,11 +812,11 @@ async fn switch_keymap_via_command_mode() {
         .await;
 
     // Now in Emacs mode: M-f should move word forward
-    let col_before = ed.state.cursor.col;
+    let col_before = ed.engine.state.cursor.col;
     ed.handle_key_for_test(KeyCode::Char('f'), KeyModifiers::ALT)
         .await;
     assert!(
-        ed.state.cursor.col > col_before,
+        ed.engine.state.cursor.col > col_before,
         "M-f works after :keymap emacs"
     );
 }
@@ -842,10 +842,10 @@ async fn vim_c_after_emacs_switch_enters_visual_block() {
     // Ctrl-v should enter visual block mode
     ed.handle_key_for_test(KeyCode::Char('v'), KeyModifiers::CONTROL)
         .await;
-    assert_eq!(ed.state.mode, Mode::Visual);
-    assert_eq!(ed.state.visual_type, Some(VisualType::Block));
+    assert_eq!(ed.engine.state.mode, Mode::Visual);
+    assert_eq!(ed.engine.state.visual_type, Some(VisualType::Block));
     // Esc should exit
     ed.handle_key_for_test(KeyCode::Esc, KeyModifiers::NONE)
         .await;
-    assert_eq!(ed.state.mode, Mode::Normal);
+    assert_eq!(ed.engine.state.mode, Mode::Normal);
 }

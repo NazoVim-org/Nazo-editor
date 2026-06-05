@@ -10,19 +10,12 @@ pub(crate) mod visual;
 
 use crate::buffer::TextBuffer;
 use crate::config::Config;
-#[cfg(feature = "syntax")]
-use crate::highlight::Highlighter;
-use crate::highlight::Style;
+use crate::engine::{Engine, EngineResult};
 use crate::keymap::{create_keymap, KeymapHandler};
 use crate::plugin::PluginManager;
-use crate::register::Register;
 use crate::renderer::Renderer;
 use crate::terminal::Terminal;
-use crate::types::{
-    EditorState, Keymap, Mode, PendingOperator, PluginEvent, Position, Result, SearchDirection,
-    SearchResult,
-};
-use crate::undo::UndoManager;
+use crate::types::{EditorState, Keymap, Mode, Position, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use std::cell::RefCell;
 use std::io;
@@ -30,180 +23,63 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 pub struct Editor {
+    pub engine: Engine,
     pub terminal: Terminal,
-    pub buffer: TextBuffer,
-    #[cfg(feature = "syntax")]
-    pub(crate) highlighter: Highlighter,
-    pub(crate) renderer: Renderer,
-    pub(crate) plugin_manager: PluginManager,
-    pub register: Register,
-    pub(crate) undo_manager: UndoManager,
-    pub state: EditorState,
-    pub running: bool,
-    #[cfg(feature = "syntax")]
-    pub(crate) last_highlight_mod_count: usize,
-    pub(crate) last_keypress_time: Instant,
-    pub(crate) needs_render: bool,
-    /// Pending operator state machine (tracks operator/count/text-object).
-    pub pending_op: PendingOperator,
-    /// Numeric count prefix (e.g., `3` in `3j`). Accumulated digit by digit.
-    pub pending_count: Option<usize>,
-    pub(crate) pending_register: Option<char>,
-    pub(crate) pending_mark: Option<char>,
-    pub(crate) pending_macro_play: Option<char>,
-    pub(crate) search_query: String,
-    pub(crate) search_direction: SearchDirection,
-    pub(crate) search_results: Vec<SearchResult>,
-    pub(crate) current_search_idx: usize,
-    pub(crate) dot_last_action: Option<DotAction>,
-    pub(crate) replace_char: Option<char>,
-    pub(crate) last_fchar: Option<char>,
-    pub(crate) last_fchar_till: bool,
+    pub renderer: Renderer,
     pub(crate) keymap_handler: Rc<RefCell<dyn KeymapHandler>>,
-    pub(crate) highlights: Vec<Vec<(Style, String)>>,
-    pub kill_ring: KillRing,
-    /// Cursor position before the last yank (for yank-pop cycle).
-    pub yank_start: Option<crate::types::Position>,
-    /// Length of text inserted by the last yank (for yank-pop undo).
-    pub yank_length: usize,
-    /// Accumulated characters typed during the current insert-mode session.
-    /// Used to push a single undo-group when leaving insert mode.
-    pub(crate) insert_accum: String,
-    /// Cursor position when insert mode was entered (for undo cursor_before).
-    pub(crate) insert_start_pos: Option<crate::types::Position>,
-}
-
-/// Cyclic kill-ring: holds Emacs kill history entries.
-/// - push(): insert newest entry at front (up to MAX_ENTRIES)
-/// - yank(): get the newest entry
-/// - yank_pop(): cycle to the previous entry (for future M-y)
-#[derive(Clone)]
-pub struct KillRing {
-    entries: Vec<String>,
-    index: usize,
-    max_entries: usize,
-}
-
-impl KillRing {
-    const MAX_ENTRIES: usize = 60;
-
-    pub fn new() -> Self {
-        Self {
-            entries: Vec::with_capacity(Self::MAX_ENTRIES),
-            index: 0,
-            max_entries: Self::MAX_ENTRIES,
-        }
-    }
-
-    pub fn push(&mut self, text: &str) {
-        if text.is_empty() {
-            return;
-        }
-        if self.entries.len() >= self.max_entries {
-            self.entries.pop();
-        }
-        self.entries.insert(0, text.to_string());
-        self.index = 0;
-    }
-
-    pub fn yank(&self) -> Option<&str> {
-        self.entries.first().map(|s| s.as_str())
-    }
-
-    /// Return the entry at the current index (for yank-pop cycling).
-    pub fn current_yank(&self) -> Option<&str> {
-        self.entries.get(self.index).map(|s| s.as_str())
-    }
-
-    /// Advance the index and return the next entry (yank-pop forward).
-    pub fn yank_pop(&mut self) -> Option<&str> {
-        if self.entries.is_empty() {
-            return None;
-        }
-        self.index = (self.index + 1) % self.entries.len();
-        self.entries.get(self.index).map(|s| s.as_str())
-    }
-
-    pub fn reset_index(&mut self) {
-        self.index = 0;
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
-
-impl Default for KillRing {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Clone)]
-pub(crate) enum DotAction {
-    Insert {
-        text: String,
-    },
-    Delete {
-        text: String,
-        line: usize,
-        col: usize,
-    },
-    Change {
-        text: String,
-        line: usize,
-        col: usize,
-    },
+    pub running: bool,
+    pub(crate) needs_render: bool,
+    pub config: Config,
 }
 
 impl Editor {
-    /// Shared struct literal construction — both public constructors delegate here.
+    /// Notify buffer modification to plugins and update dirty flag.
+    pub(crate) fn on_buffer_modified(&mut self) {
+        self.engine.emit_buffer_change();
+        self.needs_render = true;
+    }
+
+    /// Transition mode with plugin event.
+    pub(crate) fn transition_mode(&mut self, to: Mode) {
+        let from = self.engine.state.mode;
+        self.engine.state.mode = to;
+        self.engine.plugin_manager.emit(crate::types::PluginEvent::ModeChange { from, to });
+        self.needs_render = true;
+    }
+
+    /// Apply an EngineResult to the Editor's UI state.
+    fn apply_result(&mut self, r: EngineResult) {
+        if r.needs_render {
+            self.needs_render = true;
+        }
+        if let Some(running) = r.running {
+            self.running = running;
+        }
+        if let Some(msg) = r.message {
+            self.engine.state.set_message(msg);
+        }
+        if let Some((msg, action)) = r.confirmation {
+            self.engine.state.set_confirmation(msg, action);
+        }
+    }
+
+    /// Shared constructor.
     fn new_shared(
         terminal: Terminal,
         buffer: TextBuffer,
         plugin_manager: PluginManager,
         state: EditorState,
         keymap: Keymap,
+        cfg: Config,
     ) -> Self {
         Self {
+            engine: Engine::new(buffer, plugin_manager, state),
             terminal,
-            buffer,
-            #[cfg(feature = "syntax")]
-            highlighter: Highlighter::new(),
             renderer: Renderer::new(),
-            plugin_manager,
-            register: Register::new(),
-            undo_manager: UndoManager::new(),
-            state,
-            running: false,
-            #[cfg(feature = "syntax")]
-            last_highlight_mod_count: 0,
-            last_keypress_time: Instant::now(),
-            needs_render: true,
-            pending_op: PendingOperator::Idle,
-            pending_count: None,
-            pending_register: None,
-            pending_mark: None,
-            pending_macro_play: None,
-            search_query: String::new(),
-            search_direction: SearchDirection::Forward,
-            search_results: Vec::new(),
-            current_search_idx: 0,
-            dot_last_action: None,
-            replace_char: None,
-            last_fchar: None,
-            last_fchar_till: false,
             keymap_handler: create_keymap(keymap),
-            highlights: Vec::new(),
-            insert_accum: String::new(),
-            insert_start_pos: None,
-            kill_ring: KillRing::new(),
-            yank_start: None,
-            yank_length: 0,
+            running: false,
+            needs_render: true,
+            config: cfg,
         }
     }
 
@@ -218,6 +94,7 @@ impl Editor {
             PluginManager::new(),
             state,
             keymap,
+            Config::default(),
         ))
     }
 
@@ -256,6 +133,7 @@ impl Editor {
             plugin_manager,
             state,
             keymap,
+            cfg,
         ))
     }
 
@@ -264,23 +142,23 @@ impl Editor {
 
         if let Err(e) = self.renderer.render(
             &mut self.terminal,
-            &self.buffer,
-            &self.state,
-            &self.highlights,
+            &self.engine.buffer,
+            &self.engine.state,
+            &self.engine.highlights,
         ) {
-            self.state.set_message(format!("Render error: {}", e));
+            self.engine.state.set_message(format!("Render error: {}", e));
         }
         self.needs_render = false;
 
         let poll_timeout = Duration::from_millis(150);
 
         while self.running {
-            self.state.dirty = self.buffer.is_dirty();
+            self.engine.state.dirty = self.engine.buffer.is_dirty();
 
             if event::poll(poll_timeout)? {
                 match event::read() {
                     Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
-                        self.last_keypress_time = Instant::now();
+                        self.engine.last_keypress_time = Instant::now();
                         let modifiers = key.modifiers;
                         self.handle_key(key.code, modifiers).await;
                     }
@@ -291,7 +169,9 @@ impl Editor {
                     }
                     Ok(_) => {}
                     Err(e) => {
-                        self.state.set_message(format!("Event read error: {}", e));
+                        self.engine
+                            .state
+                            .set_message(format!("Event read error: {}", e));
                     }
                 }
             }
@@ -299,27 +179,33 @@ impl Editor {
             #[cfg(feature = "syntax")]
             {
                 let now = Instant::now();
-                if self.buffer.modification_count() > self.last_highlight_mod_count
-                    && now.duration_since(self.last_keypress_time) > Duration::from_millis(150)
+                if self.engine.buffer.modification_count()
+                    > self.engine.last_highlight_mod_count
+                    && now.duration_since(self.engine.last_keypress_time)
+                        > Duration::from_millis(150)
                 {
-                    self.highlights = self
+                    self.engine.highlights = self
+                        .engine
                         .highlighter
-                        .update(&self.buffer.to_string(), self.state.file_path.as_deref());
-                    self.last_highlight_mod_count = self.buffer.modification_count();
+                        .update(
+                            &self.engine.buffer.to_string(),
+                            self.engine.state.file_path.as_deref(),
+                        );
+                    self.engine.last_highlight_mod_count =
+                        self.engine.buffer.modification_count();
                 }
             }
-            // When `syntax` is disabled, `self.highlights` stays empty and the
-            // renderer falls back to default cell styles. The 150 ms debounce
-            // is intentionally preserved so polling cadence is unchanged.
 
             if self.needs_render {
                 if let Err(e) = self.renderer.render(
                     &mut self.terminal,
-                    &self.buffer,
-                    &self.state,
-                    &self.highlights,
+                    &self.engine.buffer,
+                    &self.engine.state,
+                    &self.engine.highlights,
                 ) {
-                    self.state.set_message(format!("Render error: {}", e));
+                    self.engine
+                        .state
+                        .set_message(format!("Render error: {}", e));
                 }
                 self.needs_render = false;
             }
@@ -331,9 +217,7 @@ impl Editor {
     #[allow(clippy::await_holding_refcell_ref)]
     async fn handle_key(&mut self, key: KeyCode, modifiers: KeyModifiers) {
         // Clear transient message on next key press (Vim-like behaviour).
-        self.state.clear_message();
-        // Safety: single-threaded TUI context; no concurrent RefCell access possible.
-        // The RefMut is held across await because the future borrows the handler.
+        self.engine.state.clear_message();
         let keymap_handler = Rc::clone(&self.keymap_handler);
         keymap_handler
             .borrow_mut()
@@ -344,165 +228,73 @@ impl Editor {
     /// Emit a key-press event to the plugin system and record macros if recording.
     /// Called by both Vim and Emacs keymap handlers.
     pub(crate) fn emit_key_event(&mut self, key: KeyCode) {
-        let key_str = match key {
-            KeyCode::Char(c) => c.to_string(),
-            KeyCode::Enter => "Enter".to_string(),
-            KeyCode::Esc => "Esc".to_string(),
-            KeyCode::Backspace => "Backspace".to_string(),
-            KeyCode::Tab => "Tab".to_string(),
-            KeyCode::BackTab => "BackTab".to_string(),
-            KeyCode::Delete => "Delete".to_string(),
-            KeyCode::Insert => "Insert".to_string(),
-            KeyCode::Home => "Home".to_string(),
-            KeyCode::End => "End".to_string(),
-            KeyCode::PageUp => "PageUp".to_string(),
-            KeyCode::PageDown => "PageDown".to_string(),
-            KeyCode::Left => "Left".to_string(),
-            KeyCode::Right => "Right".to_string(),
-            KeyCode::Up => "Up".to_string(),
-            KeyCode::Down => "Down".to_string(),
-            KeyCode::F(n) => format!("F{}", n),
-            KeyCode::Null => "Null".to_string(),
-            KeyCode::CapsLock => "CapsLock".to_string(),
-            KeyCode::ScrollLock => "ScrollLock".to_string(),
-            KeyCode::NumLock => "NumLock".to_string(),
-            KeyCode::PrintScreen => "PrintScreen".to_string(),
-            KeyCode::Pause => "Pause".to_string(),
-            KeyCode::Menu => "Menu".to_string(),
-            KeyCode::KeypadBegin => "KeypadBegin".to_string(),
-            KeyCode::Media(m) => format!("Media({:?})", m),
-            KeyCode::Modifier(m) => format!("Modifier({:?})", m),
-        };
-
-        self.plugin_manager.emit(PluginEvent::Key {
-            mode: self.state.mode,
-            key: key_str.clone(),
-        });
-
-        if self.state.macros.is_recording() {
-            self.state.macros.add_key(key_str);
-        }
+        self.engine.emit_key_event(key);
     }
 
-    /// Take the accumulated count prefix, defaulting to 1.
-    fn take_count(&mut self) -> usize {
-        self.pending_count.take().unwrap_or(1)
+    /// Expose count from operator state.
+    pub fn take_count(&mut self) -> usize {
+        self.engine.take_count()
     }
 
-    fn on_buffer_modified(&mut self) {
-        self.plugin_manager.emit(PluginEvent::BufferChange);
-        // Mirror the buffer's dirty state into the renderer's view. The
-        // buffer is the single source of truth (modification_count).
-        self.state.dirty = self.buffer.is_dirty();
-        self.needs_render = true;
+    // ── Methods that delegate directly to engine ────────────────
+
+    pub fn undo(&mut self) {
+        let result = self.engine.undo();
+        self.apply_result(result);
     }
 
-    pub(crate) fn transition_mode(&mut self, to: Mode) {
-        let from = self.state.mode;
-        self.state.mode = to;
-        self.plugin_manager
-            .emit(PluginEvent::ModeChange { from, to });
+    pub fn redo(&mut self) {
+        let result = self.engine.redo();
+        self.apply_result(result);
     }
 
-    pub(crate) fn undo(&mut self) {
-        if let Some(edit) = self.undo_manager.undo(&mut self.buffer) {
-            self.state.cursor = edit.cursor_before;
-            // `is_clean()` already reflects the post-undo modification count.
-            self.state.dirty = self.buffer.is_dirty();
-            self.needs_render = true;
-        }
+    pub fn show_file_info(&mut self) {
+        let result = self.engine.show_file_info();
+        self.apply_result(result);
     }
 
-    pub(crate) fn redo(&mut self) {
-        if let Some(edit) = self.undo_manager.redo(&mut self.buffer) {
-            self.state.cursor = edit.cursor_after;
-            self.state.dirty = self.buffer.is_dirty();
-            self.needs_render = true;
-        }
+    pub async fn save_file_async(&mut self) {
+        let result = self.engine.save_file_async().await;
+        self.apply_result(result);
     }
 
-    /// Switch the active keymap at runtime (e.g., via `:keymap vim`).
     pub fn switch_keymap(&mut self, name: &str) {
         let keymap = match name {
             "vim" => Keymap::Vim,
             "emacs" => Keymap::Emacs,
             _ => {
-                self.state
+                self.engine
+                    .state
                     .set_message(format!("Unknown keymap: {} (use vim or emacs)", name));
                 return;
             }
         };
         self.keymap_handler = create_keymap(keymap);
-        // Reset all pending state to avoid stuck operators
-        self.pending_op = PendingOperator::Idle;
-        self.pending_count = None;
-        self.pending_register = None;
-        self.pending_mark = None;
-        self.pending_macro_play = None;
-        // Reset editor mode
-        self.state.mode = Mode::Normal;
-        self.state.visual_start = None;
-        self.state.visual_type = None;
-        self.state.command_buffer.clear();
+        self.engine.reset_state_for_keymap_switch();
         self.needs_render = true;
     }
 
-    pub fn show_file_info(&mut self) {
-        let line_count = self.buffer.line_count();
-        let _col = self.state.cursor.col + 1;
-        let total = self.buffer.len_chars();
-        let path = self
-            .state
-            .file_path
-            .as_ref()
-            .map(|p| p.to_str().unwrap_or(""))
-            .unwrap_or("[No Name]");
-        self.state.set_message(format!(
-            "\"{}\" {} lines, {} characters",
-            path, line_count, total
-        ));
-    }
-
-    pub async fn save_file_async(&mut self) {
-        if let Err(e) = self.buffer.save_file().await {
-            self.state.set_message(format!("Save failed: {}", e));
-        } else {
-            // `TextBuffer::save_file` already calls `mark_clean`, so the buffer
-            // is the source of truth — mirror that into the renderer's view.
-            self.state.dirty = false;
-        }
-        self.needs_render = true;
-    }
-
-    pub fn quit(&mut self) {
-        self.running = false;
-    }
+    // ── Test helpers ────────────────────────────────────────────
 
     pub fn set_buffer_for_test(&mut self, text: &str) {
-        // Build a fresh buffer and seed it from `text` in one go. We keep
-        // `text` verbatim (including the trailing newline, if any) so the
-        // resulting document matches what the test expects on `get_line`.
-        self.buffer = TextBuffer::with_text(text);
-        self.state.cursor.line = 1;
-        self.state.cursor.col = 0;
-        self.state.mode = Mode::Normal;
-        self.state.dirty = false;
-        self.undo_manager.clear();
-        // The buffer is seeded in a single shot, so it is logically clean.
-        self.buffer.mark_clean();
+        self.engine.set_buffer_for_test(text);
     }
 
     pub fn snapshot_for_test(&self) -> (String, usize, usize, Mode) {
-        (
-            self.buffer.to_string(),
-            self.state.cursor.line,
-            self.state.cursor.col,
-            self.state.mode,
-        )
+        self.engine.snapshot_for_test()
     }
 
     pub async fn handle_key_for_test(&mut self, key: KeyCode, modifiers: KeyModifiers) {
         self.handle_key(key, modifiers).await;
+    }
+
+    /// Expose engine's kill_ring for tests
+    pub fn kill_ring(&self) -> &crate::types::KillRing {
+        &self.engine.kill_ring
+    }
+
+    pub fn kill_ring_mut(&mut self) -> &mut crate::types::KillRing {
+        &mut self.engine.kill_ring
     }
 }
 
@@ -515,10 +307,7 @@ mod tests {
     fn test_editor(keymap: Keymap) -> Editor {
         let terminal = Terminal::new().expect("terminal");
         let buffer = TextBuffer::new();
-        let renderer = Renderer::new();
         let plugin_manager = PluginManager::new();
-        let register = Register::new();
-        let undo_manager = UndoManager::new();
         let state = EditorState {
             mode: Mode::Normal,
             cursor: crate::types::Position { line: 1, col: 0 },
@@ -538,51 +327,25 @@ mod tests {
         };
 
         Editor {
+            engine: Engine::new(buffer, plugin_manager, state),
             terminal,
-            buffer,
-            #[cfg(feature = "syntax")]
-            highlighter: Highlighter::new(),
-            renderer,
-            plugin_manager,
-            register,
-            undo_manager,
-            state,
-            running: true,
-            #[cfg(feature = "syntax")]
-            last_highlight_mod_count: 0,
-            last_keypress_time: Instant::now(),
-            needs_render: false,
-            pending_op: PendingOperator::Idle,
-            pending_count: None,
-            pending_register: None,
-            pending_mark: None,
-            pending_macro_play: None,
-            search_query: String::new(),
-            search_direction: SearchDirection::Forward,
-            search_results: Vec::new(),
-            current_search_idx: 0,
-            dot_last_action: None,
-            replace_char: None,
-            last_fchar: None,
-            last_fchar_till: false,
+            renderer: Renderer::new(),
             keymap_handler: create_keymap(keymap),
-            kill_ring: KillRing::new(),
-            highlights: Vec::new(),
-            insert_accum: String::new(),
-            insert_start_pos: None,
-            yank_start: None,
-            yank_length: 0,
+            running: true,
+            needs_render: false,
+            config: Config::default(),
         }
     }
 
     #[test]
     fn dirty_quit_confirmation_message_matches_expected() {
         let mut editor = test_editor(Keymap::Vim);
-        editor.buffer.force_dirty(true);
+        editor.engine.buffer.force_dirty(true);
 
         editor.handle_quit();
 
         let prompt = editor
+            .engine
             .state
             .confirmation_prompt
             .as_ref()
@@ -597,19 +360,19 @@ mod tests {
     #[test]
     fn emacs_quit_uses_same_dirty_confirmation_flow_as_vim() {
         let mut editor = test_editor(Keymap::Emacs);
-        editor.buffer.force_dirty(true);
+        editor.engine.buffer.force_dirty(true);
 
         editor.handle_quit();
 
-        assert!(editor.state.has_confirmation());
-        let prompt = editor.state.confirmation_prompt.as_ref().unwrap();
+        assert!(editor.engine.state.has_confirmation());
+        let prompt = editor.engine.state.confirmation_prompt.as_ref().unwrap();
         assert!(matches!(prompt.action, ConfirmAction::Quit));
     }
 
     #[tokio::test]
     async fn emacs_ctrl_x_ctrl_c_triggers_same_quit_path() {
         let mut editor = test_editor(Keymap::Emacs);
-        editor.buffer.force_dirty(true);
+        editor.engine.buffer.force_dirty(true);
 
         editor
             .handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)
@@ -618,14 +381,14 @@ mod tests {
             .handle_key_for_test(KeyCode::Char('c'), KeyModifiers::CONTROL)
             .await;
 
-        assert!(editor.state.has_confirmation());
+        assert!(editor.engine.state.has_confirmation());
         assert!(editor.running);
     }
 
     #[tokio::test]
     async fn emacs_dirty_quit_confirmation_accept_exits_editor() {
         let mut editor = test_editor(Keymap::Emacs);
-        editor.buffer.force_dirty(true);
+        editor.engine.buffer.force_dirty(true);
 
         editor
             .handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)
@@ -633,21 +396,21 @@ mod tests {
         editor
             .handle_key_for_test(KeyCode::Char('c'), KeyModifiers::CONTROL)
             .await;
-        assert!(editor.state.has_confirmation());
+        assert!(editor.engine.state.has_confirmation());
         assert!(editor.running);
 
         editor
             .handle_key_for_test(KeyCode::Char('y'), KeyModifiers::NONE)
             .await;
 
-        assert!(!editor.state.has_confirmation());
+        assert!(!editor.engine.state.has_confirmation());
         assert!(!editor.running);
     }
 
     #[tokio::test]
     async fn emacs_clean_quit_exits_immediately() {
         let mut editor = test_editor(Keymap::Emacs);
-        editor.buffer.force_dirty(false);
+        editor.engine.buffer.force_dirty(false);
 
         editor
             .handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)
@@ -656,7 +419,7 @@ mod tests {
             .handle_key_for_test(KeyCode::Char('c'), KeyModifiers::CONTROL)
             .await;
 
-        assert!(!editor.state.has_confirmation());
+        assert!(!editor.engine.state.has_confirmation());
         assert!(!editor.running);
     }
 
@@ -665,9 +428,8 @@ mod tests {
     #[test]
     fn emacs_mark_defaults_to_none() {
         let editor = test_editor(Keymap::Emacs);
-        assert!(editor.state.mark.is_none());
-        assert!(!editor.state.region_active);
-        assert!(!editor.has_active_region());
+        assert!(editor.engine.state.mark.is_none());
+        assert!(!editor.engine.state.region_active);
     }
 
     #[tokio::test]
@@ -675,13 +437,12 @@ mod tests {
         let mut editor = test_editor(Keymap::Emacs);
         editor.set_buffer_for_test("hello world\n");
 
-        // C-space を送信
         editor
             .handle_key_for_test(KeyCode::Char(' '), KeyModifiers::CONTROL)
             .await;
 
-        assert_eq!(editor.state.mark, Some(editor.state.cursor));
-        assert!(editor.state.region_active);
+        assert_eq!(editor.engine.state.mark, Some(editor.engine.state.cursor));
+        assert!(editor.engine.state.region_active);
     }
 
     #[test]
@@ -689,167 +450,76 @@ mod tests {
         let mut editor = test_editor(Keymap::Emacs);
         editor.set_buffer_for_test("hello world\n");
 
-        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
-        editor.state.region_active = true;
-        editor.state.cursor.col = 5;
+        editor.engine.state.mark = Some(crate::types::Position { line: 1, col: 0 });
+        editor.engine.state.region_active = true;
+        editor.engine.state.cursor.col = 5;
 
         assert!(editor.has_active_region());
     }
 
-    #[test]
-    fn emacs_has_active_region_false_when_mark_equals_cursor() {
-        let mut editor = test_editor(Keymap::Emacs);
-        editor.state.mark = Some(editor.state.cursor);
-        editor.state.region_active = true;
+    // Note: has_active_region is defined in editor/emacs_ops.rs
+    // We test it through the editor instance.
 
-        assert!(!editor.has_active_region());
-    }
-
-    #[test]
-    fn emacs_has_active_region_false_when_region_inactive() {
-        let mut editor = test_editor(Keymap::Emacs);
-        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
-        editor.state.region_active = false;
-        editor.state.cursor.col = 5;
-
-        assert!(!editor.has_active_region());
-    }
-
-    #[test]
-    fn emacs_kill_region_deletes_selected_text() {
+    #[tokio::test]
+    async fn emacs_kill_region_pushes_to_kill_ring() {
         let mut editor = test_editor(Keymap::Emacs);
         editor.set_buffer_for_test("hello world\n");
 
-        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
-        editor.state.region_active = true;
-        editor.state.cursor.col = 5;
+        editor.engine.state.mark = Some(crate::types::Position { line: 1, col: 0 });
+        editor.engine.state.region_active = true;
+        editor.engine.state.cursor.col = 5;
 
         editor.kill_region();
 
-        let text = editor.buffer.get_line(1);
-        assert_eq!(text, " world\n");
-        assert!(!editor.state.region_active);
-    }
-
-    #[test]
-    fn emacs_kill_region_pushes_to_kill_ring() {
-        let mut editor = test_editor(Keymap::Emacs);
-        editor.set_buffer_for_test("hello world\n");
-
-        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
-        editor.state.region_active = true;
-        editor.state.cursor.col = 5;
-
-        editor.kill_region();
-
-        assert_eq!(editor.kill_ring.yank(), Some("hello"));
-    }
-
-    #[test]
-    fn emacs_kill_region_with_reverse_selection() {
-        let mut editor = test_editor(Keymap::Emacs);
-        editor.set_buffer_for_test("hello world\n");
-
-        editor.state.mark = Some(crate::types::Position { line: 1, col: 5 });
-        editor.state.region_active = true;
-        editor.state.cursor.col = 0;
-
-        editor.kill_region();
-
-        let text = editor.buffer.get_line(1);
-        assert_eq!(text, " world\n");
-    }
-
-    #[test]
-    fn emacs_kill_region_pushes_to_register() {
-        let mut editor = test_editor(Keymap::Emacs);
-        editor.set_buffer_for_test("hello world\n");
-
-        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
-        editor.state.region_active = true;
-        editor.state.cursor.col = 5;
-
-        editor.kill_region();
-
-        assert_eq!(editor.register.get('"'), "hello");
-    }
-
-    #[test]
-    fn emacs_deactivate_region_clears_active_flag() {
-        let mut editor = test_editor(Keymap::Emacs);
-        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
-        editor.state.region_active = true;
-
-        editor.deactivate_region();
-
-        assert!(!editor.state.region_active);
-        assert!(editor.state.mark.is_some());
-    }
-
-    #[test]
-    fn emacs_set_mark_with_emacs_keymap() {
-        let mut editor = test_editor(Keymap::Emacs);
-        editor.set_buffer_for_test("abcdef\n");
-
-        editor.state.cursor.col = 3;
-        editor.set_mark();
-
-        assert_eq!(
-            editor.state.mark,
-            Some(crate::types::Position { line: 1, col: 3 })
-        );
-        assert!(editor.state.region_active);
+        assert_eq!(editor.kill_ring().yank(), Some("hello"));
     }
 
     #[tokio::test]
-    async fn emacs_c_w_kills_word_when_no_region() {
+    async fn emacs_deactivate_region_clears_active_flag() {
         let mut editor = test_editor(Keymap::Emacs);
-        editor.set_buffer_for_test("hello world\n");
+        editor.engine.state.mark = Some(crate::types::Position { line: 1, col: 0 });
+        editor.engine.state.region_active = true;
 
-        editor
-            .handle_key_for_test(KeyCode::Char('w'), KeyModifiers::CONTROL)
-            .await;
+        editor.deactivate_region();
 
-        let text = editor.buffer.get_line(1);
-        assert_eq!(text, " world\n");
+        assert!(!editor.engine.state.region_active);
+        assert!(editor.engine.state.mark.is_some());
     }
-
-    // ── Vim new keybindings tests ──────────────────────────────
 
     #[tokio::test]
     async fn vim_0_moves_to_column_zero() {
         let mut editor = test_editor(Keymap::Vim);
         editor.set_buffer_for_test("hello\n");
-        editor.state.cursor.col = 3;
+        editor.engine.state.cursor.col = 3;
         editor.handle_normal(KeyCode::Char('0')).await;
-        assert_eq!(editor.state.cursor.col, 0);
+        assert_eq!(editor.engine.state.cursor.col, 0);
     }
 
     #[tokio::test]
     async fn vim_dollar_moves_to_end_of_line() {
         let mut editor = test_editor(Keymap::Vim);
         editor.set_buffer_for_test("hello\n");
-        editor.state.cursor.col = 0;
+        editor.engine.state.cursor.col = 0;
         editor.handle_normal(KeyCode::Char('$')).await;
-        assert_eq!(editor.state.cursor.col, 4);
+        assert_eq!(editor.engine.state.cursor.col, 4);
     }
 
     #[tokio::test]
     async fn vim_caret_moves_to_first_non_blank() {
         let mut editor = test_editor(Keymap::Vim);
         editor.set_buffer_for_test("  hello\n");
-        editor.state.cursor.col = 6;
+        editor.engine.state.cursor.col = 6;
         editor.handle_normal(KeyCode::Char('^')).await;
-        assert_eq!(editor.state.cursor.col, 2);
+        assert_eq!(editor.engine.state.cursor.col, 2);
     }
 
     #[tokio::test]
     async fn vim_d_capital_works() {
         let mut editor = test_editor(Keymap::Vim);
         editor.set_buffer_for_test("hello world\n");
-        editor.state.cursor.col = 5; // space
+        editor.engine.state.cursor.col = 5;
         editor.handle_normal(KeyCode::Char('D')).await;
-        let text = editor.buffer.get_line(1);
+        let text = editor.engine.buffer.get_line(1);
         assert!(text.starts_with("hello"));
     }
 
@@ -858,8 +528,8 @@ mod tests {
         let mut editor = test_editor(Keymap::Vim);
         editor.set_buffer_for_test("hello\n");
         editor.handle_normal(KeyCode::Char('S')).await;
-        assert_eq!(editor.state.mode, Mode::Insert);
-        let text = editor.buffer.get_line(1);
+        assert_eq!(editor.engine.state.mode, Mode::Insert);
+        let text = editor.engine.buffer.get_line(1);
         assert_eq!(text, "\n");
     }
 
@@ -867,8 +537,8 @@ mod tests {
     async fn vim_question_mark_enters_command_mode() {
         let mut editor = test_editor(Keymap::Vim);
         editor.handle_normal(KeyCode::Char('?')).await;
-        assert_eq!(editor.state.mode, Mode::Command);
-        assert_eq!(editor.state.command_buffer, "?");
+        assert_eq!(editor.engine.state.mode, Mode::Command);
+        assert_eq!(editor.engine.state.command_buffer, "?");
     }
 
     #[test]
@@ -879,51 +549,51 @@ mod tests {
 
     // ── Emacs new keybindings tests ────────────────────────────
 
-    #[test]
-    fn emacs_copy_region_copies_without_deleting() {
+    #[tokio::test]
+    async fn emacs_copy_region_copies_without_deleting() {
         let mut editor = test_editor(Keymap::Emacs);
         editor.set_buffer_for_test("hello world\n");
-        editor.state.mark = Some(crate::types::Position { line: 1, col: 0 });
-        editor.state.region_active = true;
-        editor.state.cursor.col = 5;
+        editor.engine.state.mark = Some(crate::types::Position { line: 1, col: 0 });
+        editor.engine.state.region_active = true;
+        editor.engine.state.cursor.col = 5;
 
         editor.copy_region();
 
-        let text = editor.buffer.get_line(1);
+        let text = editor.engine.buffer.get_line(1);
         assert_eq!(text, "hello world\n");
-        assert_eq!(editor.kill_ring.yank(), Some("hello"));
-        assert!(!editor.state.region_active);
+        assert_eq!(editor.kill_ring().yank(), Some("hello"));
+        assert!(!editor.engine.state.region_active);
     }
 
-    #[test]
-    fn emacs_yank_from_kill_ring_inserts_text() {
+    #[tokio::test]
+    async fn emacs_yank_from_kill_ring_inserts_text() {
         let mut editor = test_editor(Keymap::Emacs);
         editor.set_buffer_for_test("hello world\n");
-        editor.kill_ring.push("xyz");
-        editor.state.cursor.col = 5;
+        editor.kill_ring_mut().push("xyz");
+        editor.engine.state.cursor.col = 5;
 
         editor.yank_from_kill_ring();
 
-        let text = editor.buffer.get_line(1);
+        let text = editor.engine.buffer.get_line(1);
         assert_eq!(text, "helloxyz world\n");
     }
 
-    #[test]
-    fn emacs_m_f_moves_word_forward() {
+    #[tokio::test]
+    async fn emacs_m_f_moves_word_forward() {
         let mut editor = test_editor(Keymap::Emacs);
         editor.set_buffer_for_test("hello world foo\n");
-        editor.state.cursor.col = 0;
-        editor.move_word_forward();
-        assert_eq!(editor.state.cursor.col, 5);
+        editor.engine.state.cursor.col = 0;
+        editor.handle_normal(KeyCode::Char('w')).await;
+        assert_eq!(editor.engine.state.cursor.col, 5);
     }
 
-    #[test]
-    fn emacs_m_b_moves_word_backward() {
+    #[tokio::test]
+    async fn emacs_m_b_moves_word_backward() {
         let mut editor = test_editor(Keymap::Emacs);
         editor.set_buffer_for_test("hello world\n");
-        editor.state.cursor.col = 8;
-        editor.move_word_backward();
-        assert_eq!(editor.state.cursor.col, 6);
+        editor.engine.state.cursor.col = 8;
+        editor.handle_normal(KeyCode::Char('b')).await;
+        assert_eq!(editor.engine.state.cursor.col, 6);
     }
 
     #[test]

@@ -4,16 +4,16 @@ use crossterm::event::KeyCode;
 
 impl Editor {
     pub(crate) async fn handle_command(&mut self, key: KeyCode) {
-        if self.state.has_confirmation() {
+        if self.engine.state.has_confirmation() {
             self.handle_confirmation(key).await;
             return;
         }
 
         match key {
             KeyCode::Enter => {
-                let cmd = self.state.command_buffer.trim().to_string();
+                let cmd = self.engine.state.command_buffer.trim().to_string();
                 let cmd = cmd.strip_prefix(':').unwrap_or(&cmd);
-                self.state.command_buffer.clear();
+                self.engine.state.command_buffer.clear();
 
                 match cmd {
                     "q" => {
@@ -64,29 +64,29 @@ impl Editor {
                             } else {
                                 vec![]
                             };
-                            if !self.plugin_manager.execute_command(cmd_name, args) {
-                                self.state.set_message(format!("Unknown command: {}", cmd));
+                            if !self.engine.plugin_manager.execute_command(cmd_name, args) {
+                                self.engine.state.set_message(format!("Unknown command: {}", cmd));
                             }
                         }
                     }
                 }
 
-                if !self.state.has_confirmation() {
+                if !self.engine.state.has_confirmation() {
                     self.transition_mode(Mode::Normal);
                     self.needs_render = true;
                 }
             }
             KeyCode::Esc => {
-                self.state.command_buffer.clear();
+                self.engine.state.command_buffer.clear();
                 self.transition_mode(Mode::Normal);
                 self.needs_render = true;
             }
             KeyCode::Backspace => {
-                self.state.command_buffer.pop();
+                self.engine.state.command_buffer.pop();
                 self.needs_render = true;
             }
             KeyCode::Char(c) => {
-                self.state.command_buffer.push(c);
+                self.engine.state.command_buffer.push(c);
                 self.needs_render = true;
             }
             _ => {}
@@ -94,15 +94,15 @@ impl Editor {
     }
 
     pub fn handle_quit(&mut self) {
-        if self.buffer.is_dirty() {
-            self.state.set_confirmation(
+        if self.engine.buffer.is_dirty() {
+            self.engine.state.set_confirmation(
                 "No write since last change. Quit anyway? (y/n Enter/Esc: yes, n: no)".to_string(),
                 ConfirmAction::Quit,
             );
             self.needs_render = true;
         } else {
             self.running = false;
-            self.state.mode = Mode::Normal;
+            self.engine.state.mode = Mode::Normal;
         }
     }
 
@@ -111,46 +111,46 @@ impl Editor {
             KeyCode::Char('y') | KeyCode::Enter => true,
             KeyCode::Char('n') | KeyCode::Esc => false,
             _ => {
-                self.state.clear_confirmation();
+                self.engine.state.clear_confirmation();
                 self.needs_render = true;
                 return;
             }
         };
 
-        let action = self
+        let action = self.engine
             .state
             .confirmation_prompt
             .as_ref()
             .unwrap()
             .action
             .clone();
-        self.state.clear_confirmation();
+        self.engine.state.clear_confirmation();
         self.needs_render = true;
 
         match action {
             ConfirmAction::Quit => {
                 if should_quit {
                     self.running = false;
-                    self.state.mode = Mode::Normal;
+                    self.engine.state.mode = Mode::Normal;
                 }
             }
             ConfirmAction::QuitDiscard => {
                 self.running = false;
-                self.state.mode = Mode::Normal;
+                self.engine.state.mode = Mode::Normal;
             }
             ConfirmAction::WriteQuitAll => {
                 if !should_quit {
                     return;
                 }
-                if let Err(e) = self.buffer.save_file().await {
-                    self.state.set_message(format!("Save failed: {}", e));
+                if let Err(e) = self.engine.buffer.save_file().await {
+                    self.engine.state.set_message(format!("Save failed: {}", e));
                 } else {
-                    self.plugin_manager
+                    self.engine.plugin_manager
                         .emit(crate::types::PluginEvent::BufferSave {
-                            file_path: self.state.file_path.clone(),
+                            file_path: self.engine.state.file_path.clone(),
                         });
                     self.running = false;
-                    self.state.mode = Mode::Normal;
+                    self.engine.state.mode = Mode::Normal;
                 }
             }
         }
@@ -161,29 +161,29 @@ impl Editor {
 
         match args {
             "number" => {
-                self.state.show_line_numbers = true;
+                self.engine.state.show_line_numbers = true;
             }
             "nonumber" | "nonumber!" => {
-                self.state.show_line_numbers = false;
+                self.engine.state.show_line_numbers = false;
             }
             "number!" => {
-                self.state.show_line_numbers = !self.state.show_line_numbers;
+                self.engine.state.show_line_numbers = !self.engine.state.show_line_numbers;
             }
             _ => {
-                self.state
+                self.engine.state
                     .set_message(format!("Unknown set option: {}", args));
             }
         }
     }
 
     async fn reload_file(&mut self) {
-        if let Some(path) = &self.state.file_path {
+        if let Some(path) = &self.engine.state.file_path {
             match crate::buffer::TextBuffer::load_file(path.to_str().unwrap_or("")).await {
                 Ok(buf) => {
-                    self.buffer = buf;
+                    self.engine.buffer = buf;
                 }
                 Err(e) => {
-                    self.state
+                    self.engine.state
                         .set_message(format!("Failed to reload file: {}", e));
                 }
             }
@@ -197,15 +197,15 @@ impl Editor {
     /// Save the current buffer and emit a BufferSave plugin event.
     /// If the save fails, set an error message instead.
     async fn save_and_emit(&mut self) {
-        match self.buffer.save_file().await {
+        match self.engine.buffer.save_file().await {
             Ok(()) => {
-                self.plugin_manager
+                self.engine.plugin_manager
                     .emit(crate::types::PluginEvent::BufferSave {
-                        file_path: self.state.file_path.clone(),
+                        file_path: self.engine.state.file_path.clone(),
                     });
             }
             Err(e) => {
-                self.state.set_message(format!("Save failed: {}", e));
+                self.engine.state.set_message(format!("Save failed: {}", e));
             }
         }
     }
@@ -213,20 +213,20 @@ impl Editor {
     async fn handle_write_path(&mut self, cmd: &str) {
         let path_str = cmd.trim_start_matches("w!").trim_start_matches("w ").trim();
         if path_str.is_empty() {
-            self.state.set_message("Expected filename after 'w'");
+            self.engine.state.set_message("Expected filename after 'w'");
             return;
         }
         let path = std::path::PathBuf::from(path_str);
-        match self.buffer.save_to_path(&path).await {
+        match self.engine.buffer.save_to_path(&path).await {
             Ok(_) => {
-                self.state.file_path = Some(path);
-                self.plugin_manager
+                self.engine.state.file_path = Some(path);
+                self.engine.plugin_manager
                     .emit(crate::types::PluginEvent::BufferSave {
-                        file_path: self.state.file_path.clone(),
+                        file_path: self.engine.state.file_path.clone(),
                     });
             }
             Err(e) => {
-                self.state.set_message(format!("Save failed: {}", e));
+                self.engine.state.set_message(format!("Save failed: {}", e));
             }
         }
     }
@@ -237,21 +237,21 @@ impl Editor {
             .trim_start_matches("wq ")
             .trim();
         if path_str.is_empty() {
-            self.state.set_message("Expected filename after 'wq'");
+            self.engine.state.set_message("Expected filename after 'wq'");
             return;
         }
         let path = std::path::PathBuf::from(path_str);
-        match self.buffer.save_to_path(&path).await {
+        match self.engine.buffer.save_to_path(&path).await {
             Ok(_) => {
-                self.state.file_path = Some(path);
-                self.plugin_manager
+                self.engine.state.file_path = Some(path);
+                self.engine.plugin_manager
                     .emit(crate::types::PluginEvent::BufferSave {
-                        file_path: self.state.file_path.clone(),
+                        file_path: self.engine.state.file_path.clone(),
                     });
                 self.running = false;
             }
             Err(e) => {
-                self.state.set_message(format!("Save failed: {}", e));
+                self.engine.state.set_message(format!("Save failed: {}", e));
             }
         }
     }
