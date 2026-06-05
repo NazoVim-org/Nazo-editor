@@ -10,7 +10,9 @@ pub(crate) mod visual;
 
 use crate::buffer::TextBuffer;
 use crate::config::Config;
+#[cfg(feature = "syntax")]
 use crate::highlight::Highlighter;
+use crate::highlight::Style;
 use crate::keymap::{create_keymap, KeymapHandler};
 use crate::plugin::PluginManager;
 use crate::register::Register;
@@ -21,17 +23,16 @@ use crate::types::{
     SearchResult,
 };
 use crate::undo::UndoManager;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
-use futures::StreamExt;
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
-use syntect::highlighting::Style;
 
 pub struct Editor {
     pub terminal: Terminal,
     pub buffer: TextBuffer,
+    #[cfg(feature = "syntax")]
     pub(crate) highlighter: Highlighter,
     pub(crate) renderer: Renderer,
     pub(crate) plugin_manager: PluginManager,
@@ -39,6 +40,7 @@ pub struct Editor {
     pub(crate) undo_manager: UndoManager,
     pub state: EditorState,
     pub running: bool,
+    #[cfg(feature = "syntax")]
     pub(crate) last_highlight_mod_count: usize,
     pub(crate) last_keypress_time: Instant,
     pub(crate) needs_render: bool,
@@ -171,6 +173,7 @@ impl Editor {
         Self {
             terminal,
             buffer,
+            #[cfg(feature = "syntax")]
             highlighter: Highlighter::new(),
             renderer: Renderer::new(),
             plugin_manager,
@@ -178,6 +181,7 @@ impl Editor {
             undo_manager: UndoManager::new(),
             state,
             running: false,
+            #[cfg(feature = "syntax")]
             last_highlight_mod_count: 0,
             last_keypress_time: Instant::now(),
             needs_render: true,
@@ -269,38 +273,45 @@ impl Editor {
         }
         self.needs_render = false;
 
-        let mut reader = EventStream::new();
+        let poll_timeout = Duration::from_millis(150);
 
         while self.running {
             self.state.dirty = self.buffer.is_dirty();
 
-            tokio::select! {
-                Some(event) = reader.next() => {
-                    match event {
-                        Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
-                            self.last_keypress_time = Instant::now();
-                            let modifiers = key.modifiers;
-                            self.handle_key(key.code, modifiers).await;
-                        }
-                        Ok(Event::Resize(_, _)) => {
-                            self.terminal.update_size();
-                            self.terminal.clear_cache();
-                            self.needs_render = true;
-                        }
-                        _ => {}
+            if event::poll(poll_timeout)? {
+                match event::read() {
+                    Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
+                        self.last_keypress_time = Instant::now();
+                        let modifiers = key.modifiers;
+                        self.handle_key(key.code, modifiers).await;
+                    }
+                    Ok(Event::Resize(_, _)) => {
+                        self.terminal.update_size();
+                        self.terminal.clear_cache();
+                        self.needs_render = true;
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        self.state.set_message(format!("Event read error: {}", e));
                     }
                 }
             }
 
-            let now = Instant::now();
-            if self.buffer.modification_count() > self.last_highlight_mod_count
-                && now.duration_since(self.last_keypress_time) > Duration::from_millis(150)
+            #[cfg(feature = "syntax")]
             {
-                self.highlights = self
-                    .highlighter
-                    .update(&self.buffer.to_string(), self.state.file_path.as_deref());
-                self.last_highlight_mod_count = self.buffer.modification_count();
+                let now = Instant::now();
+                if self.buffer.modification_count() > self.last_highlight_mod_count
+                    && now.duration_since(self.last_keypress_time) > Duration::from_millis(150)
+                {
+                    self.highlights = self
+                        .highlighter
+                        .update(&self.buffer.to_string(), self.state.file_path.as_deref());
+                    self.last_highlight_mod_count = self.buffer.modification_count();
+                }
             }
+            // When `syntax` is disabled, `self.highlights` stays empty and the
+            // renderer falls back to default cell styles. The 150 ms debounce
+            // is intentionally preserved so polling cadence is unchanged.
 
             if self.needs_render {
                 if let Err(e) = self.renderer.render(
@@ -505,7 +516,6 @@ mod tests {
     fn test_editor(keymap: Keymap) -> Editor {
         let terminal = Terminal::new().expect("terminal");
         let buffer = TextBuffer::new();
-        let highlighter = Highlighter::new();
         let renderer = Renderer::new();
         let plugin_manager = PluginManager::new();
         let register = Register::new();
@@ -531,13 +541,15 @@ mod tests {
         Editor {
             terminal,
             buffer,
-            highlighter,
+            #[cfg(feature = "syntax")]
+            highlighter: Highlighter::new(),
             renderer,
             plugin_manager,
             register,
             undo_manager,
             state,
             running: true,
+            #[cfg(feature = "syntax")]
             last_highlight_mod_count: 0,
             last_keypress_time: Instant::now(),
             needs_render: false,
