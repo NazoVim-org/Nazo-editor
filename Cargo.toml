@@ -10,22 +10,44 @@ license = "MIT"
 name = "ivim"
 path = "src/main.rs"
 
+[features]
+# No features are enabled by default. The bare editor (TUI + buffer + keymap +
+# undo + basic commands) works without any of them.
+default = []
+
+# Syntax highlighting via syntect.
+syntax = ["dep:syntect"]
+
+# Per-language plugin loaders. Each one pulls in a heavy runtime; enable only
+# the ones you actually need.
+plugin-lua = ["dep:mlua"]
+plugin-lisp = ["dep:rust_lisp"]
+plugin-js = ["dep:quickjs-rusty"]
+plugin-rust = ["dep:libloading"]
+plugin-nix = ["dep:serde_json"]
+
+# Convenience aggregates.
+plugins = ["plugin-lua", "plugin-lisp", "plugin-js", "plugin-rust", "plugin-nix"]
+full = ["syntax", "plugins"]
+
 [dependencies]
-crossterm = { version = "0.29", features = ["event-stream"] }
+# Always-on (core editor).
+crossterm = "0.29"
 ropey = "1.6"
-syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy", "default-syntaxes", "default-themes"] }
-mlua = { version = "0.9", features = ["lua54", "vendored"] }
-rust_lisp = "0.18"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "time", "sync", "io-util"] }
+# Tokio: only the features we actually use. The editor runs on a single
+# thread with `#[tokio::main]` + `#[tokio::test]`, so `rt-multi-thread` is
+# unnecessary. `time`, `sync`, and `io-util` were audited and removed.
+tokio = { version = "1", features = ["rt", "macros", "fs"] }
 thiserror = "2"
-futures = "0.3"
-libloading = "0.8"
-clap = { version = "4", features = ["derive"] }
-arboard = "3"
-quickjs-rusty = "0.11"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 toml = "0.8"
+
+# Optional, feature-gated.
+syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy", "default-syntaxes", "default-themes"], optional = true }
+mlua = { version = "0.9", features = ["lua54", "vendored"], optional = true }
+rust_lisp = { version = "0.18", optional = true }
+quickjs-rusty = { version = "0.11", optional = true }
+libloading = { version = "0.8", optional = true }
+serde_json = { version = "1", optional = true }
 
 [profile.release]
 lto = true
