@@ -1018,7 +1018,11 @@ impl Editor {
                     }
                     self.on_buffer_modified();
                 }
-                DotAction::Delete { text: _, line: _, col: _ } => {
+                DotAction::Delete {
+                    text: _,
+                    line: _,
+                    col: _,
+                } => {
                     // Re-delete one char at current cursor position.
                     self.delete_char('"');
                     self.on_buffer_modified();

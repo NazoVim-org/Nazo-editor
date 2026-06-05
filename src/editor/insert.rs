@@ -121,9 +121,7 @@ impl Editor {
 
         let deleted = &prefix[start..col];
         if !deleted.is_empty() {
-            self.engine
-                .buffer
-                .delete_range(line, start, line, col);
+            self.engine.buffer.delete_range(line, start, line, col);
             self.engine.state.cursor.col = start;
             // Remove deleted chars from accumulator
             for _ in deleted.chars() {
@@ -168,17 +166,16 @@ impl Editor {
         }
 
         // Perform the replace — delete old, insert new.
-        let start_char = self
-            .engine
-            .buffer
-            .line_to_char(line.saturating_sub(1))
-            + self.engine.state.cursor.col;
+        let start_char =
+            self.engine.buffer.line_to_char(line.saturating_sub(1)) + self.engine.state.cursor.col;
         let end_char = start_char + old_text.chars().count();
         self.engine.buffer.remove_range(start_char, end_char);
         let new_text: String = (0..count).map(|_| c).collect();
-        self.engine
-            .buffer
-            .insert(self.engine.state.cursor.line, self.engine.state.cursor.col, &new_text);
+        self.engine.buffer.insert(
+            self.engine.state.cursor.line,
+            self.engine.state.cursor.col,
+            &new_text,
+        );
 
         // Push undo entry.
         let mod_count = self.engine.buffer.modification_count();

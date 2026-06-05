@@ -182,8 +182,7 @@ impl Editor {
                 self.engine.state.show_relative_numbers = false;
             }
             "relativenumber!" => {
-                self.engine.state.show_relative_numbers =
-                    !self.engine.state.show_relative_numbers;
+                self.engine.state.show_relative_numbers = !self.engine.state.show_relative_numbers;
             }
             "hlsearch" => {
                 self.engine.state.hlsearch = true;
