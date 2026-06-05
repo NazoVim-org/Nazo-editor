@@ -35,7 +35,7 @@ impl KeymapHandler for EmacsKeymap {
 
             editor.emit_key_event(key);
 
-            if editor.state.has_confirmation() {
+            if editor.engine.state.has_confirmation() {
                 editor.handle_confirmation(key).await;
                 return;
             }
@@ -128,11 +128,11 @@ impl KeymapHandler for EmacsKeymap {
                     editor.save_file_async().await;
                 }
                 (true, KeyCode::Char('s')) => {
-                    let prev_mode = editor.state.mode;
-                    editor.state.mode = Mode::Command;
-                    editor.state.command_buffer.clear();
-                    editor.state.command_buffer.push('/');
-                    editor.plugin_manager.emit(PluginEvent::ModeChange {
+                    let prev_mode = editor.engine.state.mode;
+                    editor.engine.state.mode = Mode::Command;
+                    editor.engine.state.command_buffer.clear();
+                    editor.engine.state.command_buffer.push('/');
+                    editor.engine.plugin_manager.emit(PluginEvent::ModeChange {
                         from: prev_mode,
                         to: Mode::Command,
                     });
@@ -140,11 +140,11 @@ impl KeymapHandler for EmacsKeymap {
                 }
                 (true, KeyCode::Char('r')) => {
                     // C-r: backward search (enter command mode with ?)
-                    let prev_mode = editor.state.mode;
-                    editor.state.mode = Mode::Command;
-                    editor.state.command_buffer.clear();
-                    editor.state.command_buffer.push('?');
-                    editor.plugin_manager.emit(PluginEvent::ModeChange {
+                    let prev_mode = editor.engine.state.mode;
+                    editor.engine.state.mode = Mode::Command;
+                    editor.engine.state.command_buffer.clear();
+                    editor.engine.state.command_buffer.push('?');
+                    editor.engine.plugin_manager.emit(PluginEvent::ModeChange {
                         from: prev_mode,
                         to: Mode::Command,
                     });

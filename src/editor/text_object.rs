@@ -4,17 +4,17 @@ use crossterm::event::KeyCode;
 
 impl Editor {
     pub(crate) fn indent_lines(&mut self, register: char, indent: bool) {
-        let line = self.state.cursor.line;
-        let content = self.buffer.get_line(line);
+        let line = self.engine.state.cursor.line;
+        let content = self.engine.buffer.get_line(line);
         let _ = register;
 
         if indent {
-            self.buffer.insert(line, 0, "\t");
+            self.engine.buffer.insert(line, 0, "\t");
         } else if content.starts_with('\t') {
-            self.buffer.delete(line, 0);
+            self.engine.buffer.delete(line, 0);
         } else if content.starts_with("  ") {
-            self.buffer.delete(line, 0);
-            self.buffer.delete(line, 0);
+            self.engine.buffer.delete(line, 0);
+            self.engine.buffer.delete(line, 0);
         }
 
         self.needs_render = true;
@@ -29,24 +29,30 @@ impl Editor {
         if let KeyCode::Char('w') = key {
             if inner {
                 let (word, start, _) = self
+                    .engine
                     .buffer
-                    .get_word_range(self.state.cursor.line, self.state.cursor.col);
+                    .get_word_range(self.engine.state.cursor.line, self.engine.state.cursor.col);
                 if !word.is_empty() {
-                    let content = self.buffer.get_char_range(
-                        self.state.cursor.line,
+                    let content = self.engine.buffer.get_char_range(
+                        self.engine.state.cursor.line,
                         start,
-                        self.state.cursor.line,
+                        self.engine.state.cursor.line,
                         start + word.len(),
                     );
-                    self.register.set(register, &content);
-                    let char_start = self.buffer.line_to_char(self.state.cursor.line - 1) + start;
+                    self.engine.register.set(register, &content);
+                    let char_start = self
+                        .engine
+                        .buffer
+                        .line_to_char(self.engine.state.cursor.line - 1)
+                        + start;
                     let char_end = char_start + word.len();
-                    self.buffer.remove_range(char_start, char_end);
+                    self.engine.buffer.remove_range(char_start, char_end);
                 }
             }
-            let prev_mode = self.state.mode;
-            self.state.mode = crate::types::Mode::Insert;
-            self.plugin_manager
+            let prev_mode = self.engine.state.mode;
+            self.engine.state.mode = crate::types::Mode::Insert;
+            self.engine
+                .plugin_manager
                 .emit(crate::types::PluginEvent::ModeChange {
                     from: prev_mode,
                     to: crate::types::Mode::Insert,
@@ -60,39 +66,44 @@ impl Editor {
         match key {
             KeyCode::Char('w') => {
                 if inner {
-                    let (word, start, _) = self
-                        .buffer
-                        .get_word_range(self.state.cursor.line, self.state.cursor.col);
+                    let (word, start, _) = self.engine.buffer.get_word_range(
+                        self.engine.state.cursor.line,
+                        self.engine.state.cursor.col,
+                    );
                     if !word.is_empty() {
-                        let char_start =
-                            self.buffer.line_to_char(self.state.cursor.line - 1) + start;
+                        let char_start = self
+                            .engine
+                            .buffer
+                            .line_to_char(self.engine.state.cursor.line - 1)
+                            + start;
                         let char_end = char_start + word.len();
-                        let content = self.buffer.get_char_range(
-                            self.state.cursor.line,
+                        let content = self.engine.buffer.get_char_range(
+                            self.engine.state.cursor.line,
                             start,
-                            self.state.cursor.line,
+                            self.engine.state.cursor.line,
                             start + word.len(),
                         );
-                        let mod_count = self.buffer.modification_count();
-                        self.register.set(register, &content);
-                        self.buffer.remove_range(char_start, char_end);
-                        self.undo_manager.push(Edit {
+                        let mod_count = self.engine.buffer.modification_count();
+                        self.engine.register.set(register, &content);
+                        self.engine.buffer.remove_range(char_start, char_end);
+                        self.engine.undo_manager.push(Edit {
                             edit_type: EditType::Delete {
-                                line: self.state.cursor.line,
+                                line: self.engine.state.cursor.line,
                                 col: start,
                                 text: content,
                             },
-                            cursor_before: self.state.cursor,
-                            cursor_after: self.state.cursor,
+                            cursor_before: self.engine.state.cursor,
+                            cursor_after: self.engine.state.cursor,
                             modification_count: mod_count,
                         });
                     }
                 } else {
-                    let (word, start, end) = self
-                        .buffer
-                        .get_word_range(self.state.cursor.line, self.state.cursor.col);
+                    let (word, start, end) = self.engine.buffer.get_word_range(
+                        self.engine.state.cursor.line,
+                        self.engine.state.cursor.col,
+                    );
                     if !word.is_empty() {
-                        let line = self.buffer.get_line(self.state.cursor.line);
+                        let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
                         let line_chars: Vec<char> = line.chars().collect();
                         let mut aw_start = start;
                         while aw_start > 0 {
@@ -110,26 +121,29 @@ impl Editor {
                                 break;
                             }
                         }
-                        let char_start =
-                            self.buffer.line_to_char(self.state.cursor.line - 1) + aw_start;
+                        let char_start = self
+                            .engine
+                            .buffer
+                            .line_to_char(self.engine.state.cursor.line - 1)
+                            + aw_start;
                         let char_end = char_start + (aw_end - aw_start);
-                        let content = self.buffer.get_char_range(
-                            self.state.cursor.line,
+                        let content = self.engine.buffer.get_char_range(
+                            self.engine.state.cursor.line,
                             aw_start,
-                            self.state.cursor.line,
+                            self.engine.state.cursor.line,
                             aw_end,
                         );
-                        let mod_count = self.buffer.modification_count();
-                        self.register.set(register, &content);
-                        self.buffer.remove_range(char_start, char_end);
-                        self.undo_manager.push(Edit {
+                        let mod_count = self.engine.buffer.modification_count();
+                        self.engine.register.set(register, &content);
+                        self.engine.buffer.remove_range(char_start, char_end);
+                        self.engine.undo_manager.push(Edit {
                             edit_type: EditType::Delete {
-                                line: self.state.cursor.line,
+                                line: self.engine.state.cursor.line,
                                 col: aw_start,
                                 text: content,
                             },
-                            cursor_before: self.state.cursor,
-                            cursor_after: self.state.cursor,
+                            cursor_before: self.engine.state.cursor,
+                            cursor_after: self.engine.state.cursor,
                             modification_count: mod_count,
                         });
                     }
@@ -158,9 +172,9 @@ impl Editor {
     }
 
     fn handle_quote_text_object(&mut self, register: char, quote: char, inner: bool) {
-        let line = self.buffer.get_line(self.state.cursor.line);
+        let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
         let chars: Vec<char> = line.chars().collect();
-        let col = self.state.cursor.col;
+        let col = self.engine.state.cursor.col;
 
         let mut open_pos: Option<usize> = None;
         for i in (0..col).rev() {
@@ -187,21 +201,24 @@ impl Editor {
                 };
 
                 let content: String = chars[content_start..content_end].iter().collect();
-                let char_start =
-                    self.buffer.line_to_char(self.state.cursor.line - 1) + content_start;
+                let char_start = self
+                    .engine
+                    .buffer
+                    .line_to_char(self.engine.state.cursor.line - 1)
+                    + content_start;
                 let char_end = char_start + content.len();
-                let mod_count = self.buffer.modification_count();
+                let mod_count = self.engine.buffer.modification_count();
 
-                self.register.set(register, &content);
-                self.buffer.remove_range(char_start, char_end);
-                self.undo_manager.push(Edit {
+                self.engine.register.set(register, &content);
+                self.engine.buffer.remove_range(char_start, char_end);
+                self.engine.undo_manager.push(Edit {
                     edit_type: EditType::Delete {
-                        line: self.state.cursor.line,
+                        line: self.engine.state.cursor.line,
                         col: content_start,
                         text: content,
                     },
-                    cursor_before: self.state.cursor,
-                    cursor_after: self.state.cursor,
+                    cursor_before: self.engine.state.cursor,
+                    cursor_after: self.engine.state.cursor,
                     modification_count: mod_count,
                 });
             }
@@ -209,14 +226,14 @@ impl Editor {
     }
 
     fn handle_bracket_text_object(&mut self, register: char, open: char, close: char, inner: bool) {
-        let col = self.state.cursor.col;
+        let col = self.engine.state.cursor.col;
 
         let mut open_pos: Option<usize> = None;
-        let mut open_line = self.state.cursor.line;
-        for l in (1..=self.state.cursor.line).rev() {
-            let l_chars: Vec<char> = self.buffer.get_line(l).chars().collect();
+        let mut open_line = self.engine.state.cursor.line;
+        for l in (1..=self.engine.state.cursor.line).rev() {
+            let l_chars: Vec<char> = self.engine.buffer.get_line(l).chars().collect();
             for i in (0..l_chars.len()).rev() {
-                if l == self.state.cursor.line && i >= col {
+                if l == self.engine.state.cursor.line && i >= col {
                     continue;
                 }
                 if l_chars[i] == open {
@@ -231,11 +248,11 @@ impl Editor {
         }
 
         let mut close_pos: Option<usize> = None;
-        let mut close_line = self.state.cursor.line;
-        for l in self.state.cursor.line..=self.buffer.line_count() {
-            let l_chars: Vec<char> = self.buffer.get_line(l).chars().collect();
+        let mut close_line = self.engine.state.cursor.line;
+        for l in self.engine.state.cursor.line..=self.engine.buffer.line_count() {
+            let l_chars: Vec<char> = self.engine.buffer.get_line(l).chars().collect();
             for (i, &c) in l_chars.iter().enumerate() {
-                if l == self.state.cursor.line && i <= col {
+                if l == self.engine.state.cursor.line && i <= col {
                     continue;
                 }
                 if c == close {
@@ -257,45 +274,50 @@ impl Editor {
                     (start, end + 1)
                 };
 
-                let start_char_idx = self.buffer.line_to_char(open_line - 1) + content_start;
+                let start_char_idx = self.engine.buffer.line_to_char(open_line - 1) + content_start;
                 let end_char_idx = if close_line == open_line {
                     start_char_idx + (content_end - content_start)
                 } else {
-                    self.buffer.line_to_char(close_line - 1) + content_end
+                    self.engine.buffer.line_to_char(close_line - 1) + content_end
                 };
 
                 let mut content = String::new();
                 if open_line == close_line {
-                    let line_chars: Vec<char> = self.buffer.get_line(open_line).chars().collect();
+                    let line_chars: Vec<char> =
+                        self.engine.buffer.get_line(open_line).chars().collect();
                     content = line_chars[content_start..content_end].iter().collect();
                 } else {
-                    let open_chars: Vec<char> = self.buffer.get_line(open_line).chars().collect();
+                    let open_chars: Vec<char> =
+                        self.engine.buffer.get_line(open_line).chars().collect();
                     content.push_str(&open_chars[content_start..].iter().collect::<String>());
                     content.push('\n');
                     for l in (open_line + 1)..close_line {
-                        content.push_str(&self.buffer.get_line(l));
+                        content.push_str(&self.engine.buffer.get_line(l));
                         content.push('\n');
                     }
-                    let close_chars: Vec<char> = self.buffer.get_line(close_line).chars().collect();
+                    let close_chars: Vec<char> =
+                        self.engine.buffer.get_line(close_line).chars().collect();
                     content.push_str(&close_chars[..content_end].iter().collect::<String>());
                 }
 
-                let mod_count = self.buffer.modification_count();
-                self.register.set(register, &content);
-                self.buffer.remove_range(start_char_idx, end_char_idx);
+                let mod_count = self.engine.buffer.modification_count();
+                self.engine.register.set(register, &content);
+                self.engine
+                    .buffer
+                    .remove_range(start_char_idx, end_char_idx);
 
                 // Position cursor at the start of the deleted range
-                self.state.cursor.line = open_line;
-                self.state.cursor.col = content_start;
+                self.engine.state.cursor.line = open_line;
+                self.engine.state.cursor.col = content_start;
 
-                self.undo_manager.push(Edit {
+                self.engine.undo_manager.push(Edit {
                     edit_type: EditType::Delete {
                         line: open_line,
                         col: content_start,
                         text: content,
                     },
-                    cursor_before: self.state.cursor,
-                    cursor_after: self.state.cursor,
+                    cursor_before: self.engine.state.cursor,
+                    cursor_after: self.engine.state.cursor,
                     modification_count: mod_count,
                 });
             }

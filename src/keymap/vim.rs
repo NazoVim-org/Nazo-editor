@@ -28,7 +28,7 @@ impl KeymapHandler for VimKeymap {
             editor.emit_key_event(key);
 
             if modifiers.contains(KeyModifiers::CONTROL) {
-                match editor.state.mode {
+                match editor.engine.state.mode {
                     Mode::Normal | Mode::Insert | Mode::Replace => match key {
                         KeyCode::Char('d') => {
                             editor.scroll_by(editor.terminal.rows() as usize / 2, true);
@@ -72,16 +72,16 @@ impl KeymapHandler for VimKeymap {
                         }
                         KeyCode::Char('v') => {
                             // Ctrl-v: enter visual block mode
-                            let prev_mode = editor.state.mode;
-                            editor.state.mode = Mode::Visual;
-                            editor.state.visual_start = Some(editor.state.cursor);
-                            editor.state.visual_type = Some(crate::types::VisualType::Block);
-                            editor
-                                .plugin_manager
-                                .emit(crate::types::PluginEvent::ModeChange {
+                            let prev_mode = editor.engine.state.mode;
+                            editor.engine.state.mode = Mode::Visual;
+                            editor.engine.state.visual_start = Some(editor.engine.state.cursor);
+                            editor.engine.state.visual_type = Some(crate::types::VisualType::Block);
+                            editor.engine.plugin_manager.emit(
+                                crate::types::PluginEvent::ModeChange {
                                     from: prev_mode,
                                     to: Mode::Visual,
-                                });
+                                },
+                            );
                             editor.needs_render = true;
                             return;
                         }
@@ -93,7 +93,7 @@ impl KeymapHandler for VimKeymap {
 
             // Capture mode BEFORE dispatching to prevent mode-transition keys
             // (like 'i', 'a', 'v', ':') from being re-dispatched to the new mode.
-            let mode = editor.state.mode;
+            let mode = editor.engine.state.mode;
             match mode {
                 Mode::Normal => editor.handle_normal(key).await,
                 Mode::Insert => editor.handle_insert(key).await,
