@@ -19,7 +19,7 @@ use crate::register::Register;
 use crate::renderer::Renderer;
 use crate::terminal::Terminal;
 use crate::types::{
-    CommandState, EditorState, Keymap, Mode, PluginEvent, Position, Result, SearchDirection,
+    EditorState, Keymap, Mode, PendingOperator, PluginEvent, Position, Result, SearchDirection,
     SearchResult,
 };
 use crate::undo::UndoManager;
@@ -44,8 +44,8 @@ pub struct Editor {
     pub(crate) last_highlight_mod_count: usize,
     pub(crate) last_keypress_time: Instant,
     pub(crate) needs_render: bool,
-    /// Command parser state machine (tracks operator/count/text-object).
-    pub command_state: CommandState,
+    /// Pending operator state machine (tracks operator/count/text-object).
+    pub pending_op: PendingOperator,
     /// Numeric count prefix (e.g., `3` in `3j`). Accumulated digit by digit.
     pub pending_count: Option<usize>,
     pub(crate) pending_register: Option<char>,
@@ -132,7 +132,6 @@ impl KillRing {
         self.entries.len()
     }
 
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -185,7 +184,7 @@ impl Editor {
             last_highlight_mod_count: 0,
             last_keypress_time: Instant::now(),
             needs_render: true,
-            command_state: CommandState::Idle,
+            pending_op: PendingOperator::Idle,
             pending_count: None,
             pending_register: None,
             pending_mark: None,
@@ -435,7 +434,7 @@ impl Editor {
         };
         self.keymap_handler = create_keymap(keymap);
         // Reset all pending state to avoid stuck operators
-        self.command_state = CommandState::Idle;
+        self.pending_op = PendingOperator::Idle;
         self.pending_count = None;
         self.pending_register = None;
         self.pending_mark = None;
@@ -553,7 +552,7 @@ mod tests {
             last_highlight_mod_count: 0,
             last_keypress_time: Instant::now(),
             needs_render: false,
-            command_state: CommandState::Idle,
+            pending_op: PendingOperator::Idle,
             pending_count: None,
             pending_register: None,
             pending_mark: None,

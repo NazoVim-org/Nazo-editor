@@ -1,5 +1,5 @@
 use crate::editor::{DotAction, Editor};
-use crate::types::{CommandState, Mode, Operator, PluginEvent, VisualType};
+use crate::types::{Mode, Operator, PendingOperator, PluginEvent, VisualType};
 use crate::undo::{Edit, EditType};
 use crossterm::event::KeyCode;
 
@@ -21,9 +21,9 @@ impl Editor {
         // Resolve 3-key operator sequences (e.g., diw, da(, ciw)
         // and 2-key operator + motion sequences (e.g., dd, fw).
         // Single `replace` to avoid consuming operator state on text-object mismatch.
-        let state = std::mem::replace(&mut self.command_state, CommandState::Idle);
+        let state = std::mem::replace(&mut self.pending_op, PendingOperator::Idle);
         match state {
-            CommandState::AwaitingTextObject {
+            PendingOperator::AwaitingTextObject {
                 op,
                 register,
                 inner,
@@ -39,12 +39,12 @@ impl Editor {
                 }
                 return;
             }
-            CommandState::AwaitingOperator { op, register: _ } => {
+            PendingOperator::AwaitingOperator { op, register: _ } => {
                 let count = self.take_count();
                 self.handle_operator(op, key, count).await;
                 return;
             }
-            CommandState::Idle => {}
+            PendingOperator::Idle => {}
         }
 
         let line_count = self.buffer.line_count();
@@ -256,7 +256,7 @@ impl Editor {
             KeyCode::Char('f') => {
                 if self.state.command_buffer.is_empty() {
                     let register = self.pending_register.take();
-                    self.command_state = CommandState::AwaitingOperator {
+                    self.pending_op = PendingOperator::AwaitingOperator {
                         op: Operator::FindCharForward,
                         register,
                     };
@@ -265,7 +265,7 @@ impl Editor {
             KeyCode::Char('F') => {
                 if self.state.command_buffer.is_empty() {
                     let register = self.pending_register.take();
-                    self.command_state = CommandState::AwaitingOperator {
+                    self.pending_op = PendingOperator::AwaitingOperator {
                         op: Operator::FindCharBackward,
                         register,
                     };
@@ -274,7 +274,7 @@ impl Editor {
             KeyCode::Char('t') => {
                 if self.state.command_buffer.is_empty() {
                     let register = self.pending_register.take();
-                    self.command_state = CommandState::AwaitingOperator {
+                    self.pending_op = PendingOperator::AwaitingOperator {
                         op: Operator::TillCharForward,
                         register,
                     };
@@ -283,7 +283,7 @@ impl Editor {
             KeyCode::Char('T') => {
                 if self.state.command_buffer.is_empty() {
                     let register = self.pending_register.take();
-                    self.command_state = CommandState::AwaitingOperator {
+                    self.pending_op = PendingOperator::AwaitingOperator {
                         op: Operator::TillCharBackward,
                         register,
                     };
@@ -323,14 +323,14 @@ impl Editor {
             }
             KeyCode::Char('y') => {
                 let register = self.pending_register.take();
-                self.command_state = CommandState::AwaitingOperator {
+                self.pending_op = PendingOperator::AwaitingOperator {
                     op: Operator::Yank,
                     register,
                 };
             }
             KeyCode::Char('d') => {
                 let register = self.pending_register.take();
-                self.command_state = CommandState::AwaitingOperator {
+                self.pending_op = PendingOperator::AwaitingOperator {
                     op: Operator::Delete,
                     register,
                 };
@@ -362,7 +362,7 @@ impl Editor {
                         self.state.macros.stop_recording();
                     } else {
                         let register = self.pending_register.take();
-                        self.command_state = CommandState::AwaitingOperator {
+                        self.pending_op = PendingOperator::AwaitingOperator {
                             op: Operator::RecordMacro,
                             register,
                         };
@@ -373,7 +373,7 @@ impl Editor {
                 match key {
                     KeyCode::Char('g') => {
                         let register = self.pending_register.take();
-                        self.command_state = CommandState::AwaitingOperator {
+                        self.pending_op = PendingOperator::AwaitingOperator {
                             op: Operator::Goto,
                             register,
                         };
@@ -438,7 +438,7 @@ impl Editor {
                     }
                     KeyCode::Char('c') => {
                         let register = self.pending_register.take();
-                        self.command_state = CommandState::AwaitingOperator {
+                        self.pending_op = PendingOperator::AwaitingOperator {
                             op: Operator::Change,
                             register,
                         };
@@ -452,28 +452,28 @@ impl Editor {
                     }
                     KeyCode::Char('>') => {
                         let register = self.pending_register.take();
-                        self.command_state = CommandState::AwaitingOperator {
+                        self.pending_op = PendingOperator::AwaitingOperator {
                             op: Operator::IndentRight,
                             register,
                         };
                     }
                     KeyCode::Char('<') => {
                         let register = self.pending_register.take();
-                        self.command_state = CommandState::AwaitingOperator {
+                        self.pending_op = PendingOperator::AwaitingOperator {
                             op: Operator::IndentLeft,
                             register,
                         };
                     }
                     KeyCode::Char('z') => {
                         let register = self.pending_register.take();
-                        self.command_state = CommandState::AwaitingOperator {
+                        self.pending_op = PendingOperator::AwaitingOperator {
                             op: Operator::Scroll,
                             register,
                         };
                     }
                     KeyCode::Char('Z') => {
                         let register = self.pending_register.take();
-                        self.command_state = CommandState::AwaitingOperator {
+                        self.pending_op = PendingOperator::AwaitingOperator {
                             op: Operator::SaveQuit,
                             register,
                         };
@@ -547,14 +547,14 @@ impl Editor {
                     self.yank_word_end(register);
                 }
                 KeyCode::Char('i') => {
-                    self.command_state = CommandState::AwaitingTextObject {
+                    self.pending_op = PendingOperator::AwaitingTextObject {
                         op: Operator::Yank,
                         register,
                         inner: true,
                     };
                 }
                 KeyCode::Char('a') => {
-                    self.command_state = CommandState::AwaitingTextObject {
+                    self.pending_op = PendingOperator::AwaitingTextObject {
                         op: Operator::Yank,
                         register,
                         inner: false,
@@ -572,14 +572,14 @@ impl Editor {
                     self.delete_word(register);
                 }
                 KeyCode::Char('i') => {
-                    self.command_state = CommandState::AwaitingTextObject {
+                    self.pending_op = PendingOperator::AwaitingTextObject {
                         op: Operator::Delete,
                         register,
                         inner: true,
                     };
                 }
                 KeyCode::Char('a') => {
-                    self.command_state = CommandState::AwaitingTextObject {
+                    self.pending_op = PendingOperator::AwaitingTextObject {
                         op: Operator::Delete,
                         register,
                         inner: false,
@@ -638,14 +638,14 @@ impl Editor {
                     }
                 }
                 KeyCode::Char('i') => {
-                    self.command_state = CommandState::AwaitingTextObject {
+                    self.pending_op = PendingOperator::AwaitingTextObject {
                         op: Operator::Change,
                         register,
                         inner: true,
                     };
                 }
                 KeyCode::Char('a') => {
-                    self.command_state = CommandState::AwaitingTextObject {
+                    self.pending_op = PendingOperator::AwaitingTextObject {
                         op: Operator::Change,
                         register,
                         inner: false,

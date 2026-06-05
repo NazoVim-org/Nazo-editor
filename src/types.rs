@@ -57,10 +57,13 @@ pub enum Operator {
     SaveQuit, // 'Z' prefix
 }
 
-/// Vim command parser state — single enum replaces multiple `pending_*` fields.
+/// Pending Vim operator state — replaces multiple `pending_*` fields.
+///
+/// After pressing an operator key (d, y, c, >, <, etc.), the editor waits
+/// for a motion/text-object/second key to complete the operation.
 #[derive(Debug, Clone, Default)]
-pub enum CommandState {
-    /// No pending command.
+pub enum PendingOperator {
+    /// No pending operator.
     #[default]
     Idle,
     /// Operator decided (count stays in `pending_count` for flexibility).
