@@ -1,7 +1,12 @@
+#[cfg(feature = "plugin-js")]
 pub mod javascript;
+#[cfg(feature = "plugin-lisp")]
 pub mod lisp;
+#[cfg(feature = "plugin-lua")]
 pub mod lua;
+#[cfg(feature = "plugin-nix")]
 pub mod nix;
+#[cfg(feature = "plugin-rust")]
 pub mod rust;
 
 use crate::plugin::{Plugin, PluginApi};
@@ -81,11 +86,17 @@ impl Default for LoaderRegistry {
 }
 
 pub fn create_default_registry() -> LoaderRegistry {
+    #[allow(unused_mut)]
     let mut registry = LoaderRegistry::new();
+    #[cfg(feature = "plugin-lua")]
     registry.register(Box::new(lua::LuaLoader));
+    #[cfg(feature = "plugin-lisp")]
     registry.register(Box::new(lisp::LispLoader));
+    #[cfg(feature = "plugin-js")]
     registry.register(Box::new(javascript::JavaScriptLoader));
+    #[cfg(feature = "plugin-nix")]
     registry.register(Box::new(nix::NixLoader));
+    #[cfg(feature = "plugin-rust")]
     registry.register(Box::new(rust::RustLoader));
     registry
 }

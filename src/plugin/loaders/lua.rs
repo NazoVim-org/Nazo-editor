@@ -1,3 +1,5 @@
+#![cfg(feature = "plugin-lua")]
+
 use crate::plugin::{Plugin, PluginApi};
 use crate::types::PluginEvent;
 use mlua::{Function, Lua, RegistryKey, Table, Value};

@@ -1,3 +1,5 @@
+#![cfg(feature = "plugin-lisp")]
+
 use crate::plugin::api::CommandFn;
 use crate::plugin::{Plugin, PluginApi};
 use crate::types::PluginEvent;

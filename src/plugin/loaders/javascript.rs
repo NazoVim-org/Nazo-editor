@@ -1,3 +1,5 @@
+#![cfg(feature = "plugin-js")]
+
 use crate::plugin::{Plugin, PluginApi};
 use crate::types::PluginEvent;
 use quickjs_rusty::Context;

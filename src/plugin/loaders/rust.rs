@@ -1,3 +1,5 @@
+#![cfg(feature = "plugin-rust")]
+
 use crate::plugin::api::{CommandFn, EventFn};
 use crate::plugin::{Plugin, PluginApi};
 use crate::types::PluginEvent;

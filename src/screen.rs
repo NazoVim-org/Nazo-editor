@@ -1,3 +1,4 @@
+use crate::highlight::Style;
 use crossterm::style::Color;
 use std::fmt::Write;
 
@@ -254,7 +255,8 @@ impl ScreenBuffer {
 // ── Helpers for building styled character arrays ──
 
 /// Convert a syntect `Style` into our `CellStyle`.
-pub fn from_syntect_style(s: &syntect::highlighting::Style) -> CellStyle {
+#[cfg(feature = "syntax")]
+pub fn from_syntect_style(s: &Style) -> CellStyle {
     CellStyle {
         fg: syntect_color(s.foreground),
         bg: syntect_color(s.background),
@@ -270,6 +272,7 @@ pub fn from_syntect_style(s: &syntect::highlighting::Style) -> CellStyle {
     }
 }
 
+#[cfg(feature = "syntax")]
 fn syntect_color(c: syntect::highlighting::Color) -> Color {
     if c.a == 0 {
         Color::Reset
@@ -285,13 +288,15 @@ fn syntect_color(c: syntect::highlighting::Color) -> Color {
 /// Build a per‑character styled array for one buffer line.
 ///
 /// `line` is the raw text of the line.
-/// `highlights` is the syntect highlight segments (style + text) for this line.
+/// `highlights` is the highlight segments (style + text) for this line. When
+/// the `syntax` feature is off, callers pass `None` and the function returns
+/// characters with [`CellStyle::default`].
 ///
 /// Returns `Vec<(char, CellStyle)>` where each entry corresponds to one character
 /// in the line with its associated style.
 pub fn build_styled_chars(
     line: &str,
-    highlights: Option<&[(syntect::highlighting::Style, String)]>,
+    highlights: Option<&[(Style, String)]>,
 ) -> Vec<(char, CellStyle)> {
     let chars: Vec<char> = line.chars().collect();
     let len = chars.len();
@@ -307,7 +312,15 @@ pub fn build_styled_chars(
             let text_chars: Vec<char> = text.chars().collect();
             for _ in 0..text_chars.len() {
                 if pos < len {
-                    styles.push(from_syntect_style(style));
+                    #[cfg(feature = "syntax")]
+                    {
+                        styles.push(from_syntect_style(style));
+                    }
+                    #[cfg(not(feature = "syntax"))]
+                    {
+                        let _ = style;
+                        styles.push(CellStyle::default());
+                    }
                     pos += 1;
                 }
             }

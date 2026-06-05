@@ -1,10 +1,10 @@
 use crate::buffer::TextBuffer;
+use crate::highlight::Style;
 use crate::screen::{build_styled_chars, CellStyle, ScreenBuffer};
 use crate::terminal::Terminal;
 use crate::types::{EditorState, Mode};
 use crossterm::style::Color;
 use std::io;
-use syntect::highlighting::Style;
 
 /// One visual (display) row produced from wrapping a buffer line.
 struct VisualLine {
