@@ -103,8 +103,7 @@ impl Editor {
             self.buffer
                 .insert(self.state.cursor.line, self.state.cursor.col, text);
             self.state.cursor.col += self.yank_length;
-            self.state.dirty = true;
-            self.needs_render = true;
+            self.on_buffer_modified();
         }
     }
 
@@ -129,8 +128,7 @@ impl Editor {
             self.yank_start = None;
             self.yank_length = 0;
         }
-        self.state.dirty = true;
-        self.needs_render = true;
+        self.on_buffer_modified();
     }
 
     pub fn transpose_chars(&mut self) {
@@ -150,8 +148,7 @@ impl Editor {
                 self.buffer.insert_char(line, col, c1);
                 self.state.cursor.col =
                     (col + 1).min(self.buffer.get_line(line).len().saturating_sub(1));
-                self.state.dirty = true;
-                self.needs_render = true;
+                self.on_buffer_modified();
             }
         }
     }
@@ -160,8 +157,7 @@ impl Editor {
         self.buffer
             .insert_char(self.state.cursor.line, self.state.cursor.col, '\t');
         self.state.cursor.col += 1;
-        self.state.dirty = true;
-        self.needs_render = true;
+        self.on_buffer_modified();
     }
 
     pub fn clear_screen(&mut self) {
@@ -188,8 +184,7 @@ impl Editor {
                 self.state.cursor.line,
                 end_col,
             );
-            self.state.dirty = true;
-            self.needs_render = true;
+            self.on_buffer_modified();
         } else if self.state.cursor.line < self.buffer.line_count() {
             self.buffer.delete_range(
                 self.state.cursor.line,
@@ -197,8 +192,7 @@ impl Editor {
                 self.state.cursor.line + 1,
                 0,
             );
-            self.state.dirty = true;
-            self.needs_render = true;
+            self.on_buffer_modified();
         }
     }
 
@@ -230,8 +224,7 @@ impl Editor {
                 cursor_after: self.state.cursor,
                 modification_count: mod_count,
             });
-            self.state.dirty = true;
-            self.needs_render = true;
+            self.on_buffer_modified();
         }
     }
 
@@ -239,8 +232,7 @@ impl Editor {
         self.buffer
             .insert_char(self.state.cursor.line, self.state.cursor.col, c);
         self.state.cursor.col += 1;
-        self.state.dirty = true;
-        self.needs_render = true;
+        self.on_buffer_modified();
     }
 
     pub(crate) fn delete_char_backward(&mut self) {
@@ -248,16 +240,14 @@ impl Editor {
             self.buffer
                 .delete(self.state.cursor.line, self.state.cursor.col - 1);
             self.state.cursor.col -= 1;
-            self.state.dirty = true;
-            self.needs_render = true;
+            self.on_buffer_modified();
         } else if self.state.cursor.line > 1 {
             let merged = self.buffer.get_line(self.state.cursor.line - 1);
             let prev_len = merged.len();
             self.buffer.merge_with_prev_line(self.state.cursor.line);
             self.state.cursor.line -= 1;
             self.state.cursor.col = prev_len.saturating_sub(1);
-            self.state.dirty = true;
-            self.needs_render = true;
+            self.on_buffer_modified();
         }
     }
 
@@ -271,8 +261,7 @@ impl Editor {
         }
         self.state.cursor.line += 1;
         self.state.cursor.col = 0;
-        self.state.dirty = true;
-        self.needs_render = true;
+        self.on_buffer_modified();
     }
 
     pub(crate) fn delete_char_forward(&mut self) {
@@ -292,8 +281,7 @@ impl Editor {
                 cursor_after: self.state.cursor,
                 modification_count: mod_count,
             });
-            self.state.dirty = true;
-            self.needs_render = true;
+            self.on_buffer_modified();
         }
     }
 }

@@ -2,6 +2,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
 
+/// Crate-wide error type.
+///
+/// `Box<dyn std::error::Error>` is intentionally avoided at the API boundary so
+/// that callers can pattern-match on concrete failure modes. New variants
+/// should preserve the `#[from]` conversions that downstream code relies on.
 #[derive(Error, Debug)]
 pub enum IjevimError {
     #[error("IO error: {0}")]
@@ -13,6 +18,10 @@ pub enum IjevimError {
     #[error("No file path set")]
     NoFilePath,
 }
+
+/// Crate-wide `Result` alias. Use this in lieu of `std::result::Result<T, IjevimError>`
+/// to keep signatures short and consistent across the editor core.
+pub type Result<T> = std::result::Result<T, IjevimError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Keymap {

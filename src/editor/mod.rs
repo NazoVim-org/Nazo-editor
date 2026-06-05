@@ -17,7 +17,8 @@ use crate::register::Register;
 use crate::renderer::Renderer;
 use crate::terminal::Terminal;
 use crate::types::{
-    CommandState, EditorState, Keymap, Mode, PluginEvent, Position, SearchDirection, SearchResult,
+    CommandState, EditorState, Keymap, Mode, PluginEvent, Position, Result, SearchDirection,
+    SearchResult,
 };
 use crate::undo::UndoManager;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
@@ -203,7 +204,7 @@ impl Editor {
         }
     }
 
-    pub fn new_headless_for_test(keymap: Keymap) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new_headless_for_test(keymap: Keymap) -> Result<Self> {
         let terminal = Terminal::new()?;
         let buffer = TextBuffer::new();
         let state = EditorState::default();
@@ -217,20 +218,13 @@ impl Editor {
         ))
     }
 
-    pub async fn new(
-        file_path: Option<&str>,
-        keymap: Keymap,
-        cfg: Config,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(file_path: Option<&str>, keymap: Keymap, cfg: Config) -> Result<Self> {
         let mut terminal = Terminal::new()?;
         terminal.enable_raw_mode()?;
 
         let buffer = if let Some(path) = file_path {
             match TextBuffer::load_file(path).await {
-                Ok(mut buf) => {
-                    buf.file_path = Some(std::path::PathBuf::from(path));
-                    buf
-                }
+                Ok(buf) => buf,
                 Err(e) => {
                     eprintln!("Failed to load file: {}", e);
                     TextBuffer::new()
@@ -246,7 +240,7 @@ impl Editor {
         }
 
         let state = EditorState {
-            file_path: buffer.file_path.clone(),
+            file_path: buffer.file_path().map(|p| p.to_path_buf()),
             cursor: Position { line: 1, col: 0 },
             show_line_numbers: cfg.show_line_numbers,
             wrap: cfg.wrap,
@@ -278,7 +272,7 @@ impl Editor {
         let mut reader = EventStream::new();
 
         while self.running {
-            self.state.dirty = self.buffer.dirty;
+            self.state.dirty = self.buffer.is_dirty();
 
             tokio::select! {
                 Some(event) = reader.next() => {
@@ -387,6 +381,9 @@ impl Editor {
 
     fn on_buffer_modified(&mut self) {
         self.plugin_manager.emit(PluginEvent::BufferChange);
+        // Mirror the buffer's dirty state into the renderer's view. The
+        // buffer is the single source of truth (modification_count).
+        self.state.dirty = self.buffer.is_dirty();
         self.needs_render = true;
     }
 
@@ -400,7 +397,8 @@ impl Editor {
     pub(crate) fn undo(&mut self) {
         if let Some(edit) = self.undo_manager.undo(&mut self.buffer) {
             self.state.cursor = edit.cursor_before;
-            self.buffer.dirty = !self.buffer.is_clean();
+            // `is_clean()` already reflects the post-undo modification count.
+            self.state.dirty = self.buffer.is_dirty();
             self.needs_render = true;
         }
     }
@@ -408,6 +406,7 @@ impl Editor {
     pub(crate) fn redo(&mut self) {
         if let Some(edit) = self.undo_manager.redo(&mut self.buffer) {
             self.state.cursor = edit.cursor_after;
+            self.state.dirty = self.buffer.is_dirty();
             self.needs_render = true;
         }
     }
@@ -458,6 +457,8 @@ impl Editor {
         if let Err(e) = self.buffer.save_file().await {
             self.state.set_message(format!("Save failed: {}", e));
         } else {
+            // `TextBuffer::save_file` already calls `mark_clean`, so the buffer
+            // is the source of truth — mirror that into the renderer's view.
             self.state.dirty = false;
         }
         self.needs_render = true;
@@ -468,25 +469,17 @@ impl Editor {
     }
 
     pub fn set_buffer_for_test(&mut self, text: &str) {
-        self.buffer = TextBuffer::new();
-        for ch in text.chars() {
-            if ch == '\n' {
-                self.buffer
-                    .insert_newline(self.state.cursor.line, self.state.cursor.col);
-                self.state.cursor.line += 1;
-                self.state.cursor.col = 0;
-            } else {
-                self.buffer
-                    .insert_char(self.state.cursor.line, self.state.cursor.col, ch);
-                self.state.cursor.col += 1;
-            }
-        }
+        // Build a fresh buffer and seed it from `text` in one go. We keep
+        // `text` verbatim (including the trailing newline, if any) so the
+        // resulting document matches what the test expects on `get_line`.
+        self.buffer = TextBuffer::with_text(text);
         self.state.cursor.line = 1;
         self.state.cursor.col = 0;
         self.state.mode = Mode::Normal;
         self.state.dirty = false;
         self.undo_manager.clear();
-        self.buffer.reset_clean_state();
+        // The buffer is seeded in a single shot, so it is logically clean.
+        self.buffer.mark_clean();
     }
 
     pub fn snapshot_for_test(&self) -> (String, usize, usize, Mode) {
@@ -574,7 +567,7 @@ mod tests {
     #[test]
     fn dirty_quit_confirmation_message_matches_expected() {
         let mut editor = test_editor(Keymap::Vim);
-        editor.buffer.dirty = true;
+        editor.buffer.force_dirty(true);
 
         editor.handle_quit();
 
@@ -593,7 +586,7 @@ mod tests {
     #[test]
     fn emacs_quit_uses_same_dirty_confirmation_flow_as_vim() {
         let mut editor = test_editor(Keymap::Emacs);
-        editor.buffer.dirty = true;
+        editor.buffer.force_dirty(true);
 
         editor.handle_quit();
 
@@ -605,7 +598,7 @@ mod tests {
     #[tokio::test]
     async fn emacs_ctrl_x_ctrl_c_triggers_same_quit_path() {
         let mut editor = test_editor(Keymap::Emacs);
-        editor.buffer.dirty = true;
+        editor.buffer.force_dirty(true);
 
         editor
             .handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)
@@ -621,7 +614,7 @@ mod tests {
     #[tokio::test]
     async fn emacs_dirty_quit_confirmation_accept_exits_editor() {
         let mut editor = test_editor(Keymap::Emacs);
-        editor.buffer.dirty = true;
+        editor.buffer.force_dirty(true);
 
         editor
             .handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)
@@ -643,7 +636,7 @@ mod tests {
     #[tokio::test]
     async fn emacs_clean_quit_exits_immediately() {
         let mut editor = test_editor(Keymap::Emacs);
-        editor.buffer.dirty = false;
+        editor.buffer.force_dirty(false);
 
         editor
             .handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)

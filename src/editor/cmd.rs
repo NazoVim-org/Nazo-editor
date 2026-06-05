@@ -140,7 +140,7 @@ impl Editor {
     }
 
     pub fn handle_quit(&mut self) {
-        if self.buffer.dirty {
+        if self.buffer.is_dirty() {
             self.state.set_confirmation(
                 "No write since last change. Quit anyway? (y/n Enter/Esc: yes, n: no)".to_string(),
                 ConfirmAction::Quit,
