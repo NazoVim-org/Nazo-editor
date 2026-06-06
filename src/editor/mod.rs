@@ -212,6 +212,71 @@ impl Editor {
                 }
             }
 
+            // ── Auto-scroll: keep cursor inside the focused window ──
+            {
+                let win_idx = self.engine.window_layout.focused;
+                if win_idx < self.engine.window_layout.windows.len() {
+                    let show_num = self.engine.state.show_line_numbers
+                        || self.engine.state.show_relative_numbers;
+                    let line_num_width = if show_num {
+                        self.engine.buffer.line_count().max(1).to_string().len()
+                    } else {
+                        0
+                    };
+                    let line_num_prefix = if show_num { line_num_width + 2 } else { 0 };
+                    let window = self.engine.window_layout.windows[win_idx].clone();
+                    let window_rows = window.row_end.saturating_sub(window.row_start);
+                    let window_cols = window.col_end.saturating_sub(window.col_start);
+                    let content_width = window_cols.saturating_sub(line_num_prefix).max(1);
+
+                    let scroll_top = window.scroll_top.max(1);
+                    let cursor_line = self.engine.state.cursor.line;
+                    let cursor_col = self.engine.state.cursor.col;
+                    let total_lines = self.engine.buffer.line_count();
+
+                    // Compute visual offset from window top to cursor
+                    let mut visual_offset = 0usize;
+                    let end_scan = cursor_line.min(total_lines);
+                    for line_num in scroll_top..end_scan {
+                        let line_text = self.engine.buffer.get_line(line_num);
+                        visual_offset = visual_offset.saturating_add(
+                            crate::renderer::wrapped_rows(&line_text, content_width, true),
+                        );
+                    }
+                    if cursor_line >= scroll_top && cursor_line <= total_lines {
+                        let line_text = self.engine.buffer.get_line(cursor_line);
+                        let nchars = line_text.chars().count();
+                        let nsegs = nchars.div_ceil(content_width).max(1);
+                        let seg = (cursor_col / content_width).min(nsegs.saturating_sub(1));
+                        visual_offset = visual_offset.saturating_add(seg);
+                    }
+
+                    let margin = (window_rows / 3).max(1);
+
+                    if cursor_line < scroll_top {
+                        // Cursor above viewport
+                        self.engine.window_layout.windows[win_idx].scroll_top =
+                            cursor_line.saturating_sub(margin).max(1);
+                        self.needs_render = true;
+                    } else if visual_offset >= window_rows.saturating_sub(1) {
+                        // Cursor below viewport – scroll so it sits ~1/3 from top
+                        let mut new_scroll = cursor_line;
+                        // Walk backwards to find where the cursor's visual row
+                        // would be at ~1/3 of the window
+                        let mut rows_needed = margin;
+                        while new_scroll > 1 && rows_needed > 0 {
+                            new_scroll -= 1;
+                            let t = self.engine.buffer.get_line(new_scroll);
+                            rows_needed = rows_needed.saturating_sub(
+                                crate::renderer::wrapped_rows(&t, content_width, true),
+                            );
+                        }
+                        self.engine.window_layout.windows[win_idx].scroll_top = new_scroll.max(1);
+                        self.needs_render = true;
+                    }
+                }
+            }
+
             if self.needs_render {
                 if let Err(e) = self.renderer.render(
                     &mut self.terminal,

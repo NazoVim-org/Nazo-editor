@@ -128,7 +128,17 @@ impl Renderer {
 
         // Position visual cursor at focused window's cursor position.
         if let Some(focused_window) = window_layout.windows.get(window_layout.focused) {
-            self.position_cursor(focused_window, state, cols, line_number_prefix);
+            // Select the buffer shown in the focused window (same logic as render_window).
+            let buf = if focused_window.buf_idx == 0 {
+                active_buffer
+            } else if focused_window.buf_idx > 0
+                && focused_window.buf_idx.saturating_sub(1) < inactive_buffers.len()
+            {
+                &inactive_buffers[focused_window.buf_idx.saturating_sub(1)].0
+            } else {
+                active_buffer
+            };
+            self.position_cursor(focused_window, state, buf, cols, line_number_prefix);
         }
 
         // Emit frame to terminal
@@ -460,23 +470,64 @@ impl Renderer {
     }
 
     /// Position a visual block cursor at the focused window's cursor position.
+    ///
+    /// Computes the correct visual row and column on-the-fly using
+    /// [`wrapped_rows`] so the cursor follows the actual visual layout of
+    /// wrapped lines without needing any cache.
     fn position_cursor(
         &mut self,
         window: &Window,
         state: &EditorState,
+        buffer: &TextBuffer,
         _total_cols: usize,
         line_number_prefix: usize,
     ) {
-        let row = window.row_start
-            + (state.cursor.line.saturating_sub(window.scroll_top)).min(
-                window
-                    .row_end
-                    .saturating_sub(window.row_start)
-                    .saturating_sub(1),
-            );
-        // Column = window offset + line number gutter + buffer column.
-        // This places the cursor exactly where the content character sits.
-        let col = window.col_start + line_number_prefix + state.cursor.col;
+        let window_height = window.row_end.saturating_sub(window.row_start);
+        let window_cols = window.col_end.saturating_sub(window.col_start);
+        let content_width = window_cols.saturating_sub(line_number_prefix).max(1);
+
+        let cursor_line = state.cursor.line;
+        let cursor_col = state.cursor.col;
+
+        // ── Count visual rows consumed by lines before the cursor line ──
+        let start_line = window.scroll_top.max(1);
+        let end_line = cursor_line.min(buffer.line_count());
+        let mut visual_row_offset = 0usize;
+
+        for line_num in start_line..end_line {
+            let line_text = buffer.get_line(line_num);
+            visual_row_offset += wrapped_rows(&line_text, content_width, true);
+        }
+
+        // ── Find the segment within the cursor's own line ──
+        let mut segment_start_col = 0usize;
+        let mut in_view = false;
+
+        if cursor_line >= start_line && cursor_line <= buffer.line_count() {
+            let line_text = buffer.get_line(cursor_line);
+            let line_chars = line_text.chars().count();
+            let num_segments = line_chars.div_ceil(content_width).max(1);
+
+            let seg_idx = (cursor_col / content_width).min(num_segments.saturating_sub(1));
+            visual_row_offset += seg_idx;
+            segment_start_col = seg_idx * content_width;
+            in_view = true;
+        }
+
+        // ── Row within the window viewport ──
+        let row = if in_view {
+            window.row_start + visual_row_offset.min(window_height.saturating_sub(1))
+        } else {
+            // Fallback: approximate (no wrapping)
+            window.row_start
+                + (cursor_line.saturating_sub(window.scroll_top))
+                    .min(window_height.saturating_sub(1))
+        };
+
+        // ── Column within the segment ──
+        let col =
+            window.col_start + line_number_prefix + cursor_col.saturating_sub(segment_start_col);
+
         self.screen.set_cell(
             row,
             col,
