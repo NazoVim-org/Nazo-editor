@@ -253,8 +253,8 @@ impl Engine {
         }
         // Save current buffer.
         let current = (
-            std::mem::replace(&mut self.buffer, TextBuffer::new()),
-            std::mem::replace(&mut self.undo_manager, UndoManager::new()),
+            std::mem::take(&mut self.buffer),
+            std::mem::take(&mut self.undo_manager),
             self.state.file_path.take(),
             self.state.cursor,
         );
@@ -276,8 +276,8 @@ impl Engine {
         }
         // Save current buffer.
         let current = (
-            std::mem::replace(&mut self.buffer, TextBuffer::new()),
-            std::mem::replace(&mut self.undo_manager, UndoManager::new()),
+            std::mem::take(&mut self.buffer),
+            std::mem::take(&mut self.undo_manager),
             self.state.file_path.take(),
             self.state.cursor,
         );
@@ -326,7 +326,7 @@ impl Engine {
         // Switch current buffer to inactive, open new one as active.
         let current = (
             std::mem::replace(&mut self.buffer, new_buffer),
-            std::mem::replace(&mut self.undo_manager, UndoManager::new()),
+            std::mem::take(&mut self.undo_manager),
             self.state.file_path.take(),
             self.state.cursor,
         );
@@ -390,8 +390,8 @@ impl Engine {
             // Swap active buffer with target inactive buffer
             let target_idx = target_buf_idx - 1;
             let current = (
-                std::mem::replace(&mut self.buffer, TextBuffer::new()),
-                std::mem::replace(&mut self.undo_manager, UndoManager::new()),
+                std::mem::take(&mut self.buffer),
+                std::mem::take(&mut self.undo_manager),
                 self.state.file_path.take(),
                 self.state.cursor,
             );

@@ -341,7 +341,7 @@ impl Editor {
                 self.engine.state.expandtab = !self.engine.state.expandtab;
             }
             args if args.starts_with("tabstop=") || args.starts_with("ts=") => {
-                let val = args.splitn(2, '=').nth(1).unwrap_or("8");
+                let val = args.split_once('=').map(|x| x.1).unwrap_or("8");
                 if let Ok(n) = val.parse::<usize>() {
                     self.engine.state.tabstop = n;
                 } else {
@@ -351,7 +351,7 @@ impl Editor {
                 }
             }
             args if args.starts_with("shiftwidth=") || args.starts_with("sw=") => {
-                let val = args.splitn(2, '=').nth(1).unwrap_or("4");
+                let val = args.split_once('=').map(|x| x.1).unwrap_or("4");
                 if let Ok(n) = val.parse::<usize>() {
                     self.engine.state.shiftwidth = n;
                 } else {
@@ -361,7 +361,7 @@ impl Editor {
                 }
             }
             args if args.starts_with("scrolloff=") || args.starts_with("so=") => {
-                let val = args.splitn(2, '=').nth(1).unwrap_or("0");
+                let val = args.split_once('=').map(|x| x.1).unwrap_or("0");
                 if let Ok(n) = val.parse::<usize>() {
                     self.engine.state.scrolloff = n;
                 } else {
@@ -382,10 +382,10 @@ impl Editor {
     /// Handle `:s/pattern/replacement/[g]` and `:%s/pattern/replacement/[g]`.
     fn handle_substitute(&mut self, cmd: &str) {
         // Parse the delimiter (always `/` in our implementation).
-        let (range, rest) = if cmd.starts_with("%s/") {
-            ("%", &cmd[3..])
-        } else if cmd.starts_with("s/") {
-            (".", &cmd[2..])
+        let (range, rest) = if let Some(rest) = cmd.strip_prefix("%s/") {
+            ("%", rest)
+        } else if let Some(rest) = cmd.strip_prefix("s/") {
+            (".", rest)
         } else {
             self.engine.state.push_message(
                 MessageLevel::Warning,

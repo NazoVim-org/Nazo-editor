@@ -470,7 +470,7 @@ pub fn wrapped_rows(text: &str, max_width: usize, wrap: bool) -> usize {
     if len == 0 {
         return 1;
     }
-    (len + max_width - 1) / max_width
+    len.div_ceil(max_width)
 }
 
 /// Split styled chars into screen rows.

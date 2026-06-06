@@ -233,8 +233,7 @@ impl Editor {
                             if line_idx > 1 {
                                 let prev_line = self.engine.buffer.get_line(line_idx - 1);
                                 let prev_chars: Vec<char> = prev_line.chars().collect();
-                                self.engine.state.cursor.col =
-                                    prev_chars.len().saturating_sub(1).max(0);
+                                self.engine.state.cursor.col = prev_chars.len().saturating_sub(1);
                             } else {
                                 self.engine.state.cursor.col = 0;
                             }
