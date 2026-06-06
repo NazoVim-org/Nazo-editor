@@ -726,7 +726,10 @@ async fn emacs_ctrl_x_ctrl_c_quits() {
     // Make buffer dirty by deleting a character (C-d in Emacs mode)
     ed.handle_key_for_test(KeyCode::Char('d'), KeyModifiers::CONTROL)
         .await; // delete 'h'
-    assert!(ed.engine.buffer.is_dirty(), "buffer should be dirty after C-d");
+    assert!(
+        ed.engine.buffer.is_dirty(),
+        "buffer should be dirty after C-d"
+    );
 
     // C-x C-c should trigger quit confirmation
     ed.handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)
@@ -734,7 +737,10 @@ async fn emacs_ctrl_x_ctrl_c_quits() {
     ed.handle_key_for_test(KeyCode::Char('c'), KeyModifiers::CONTROL)
         .await;
 
-    assert!(ed.engine.state.has_confirmation(), "C-x C-c triggers quit confirmation");
+    assert!(
+        ed.engine.state.has_confirmation(),
+        "C-x C-c triggers quit confirmation"
+    );
     assert!(ed.running, "editor still running after confirmation prompt");
 
     // Accept quit with 'y'
@@ -770,7 +776,10 @@ async fn emacs_ctrl_x_d_moves_to_line_end() {
     ed.handle_key_for_test(KeyCode::Char('d'), KeyModifiers::CONTROL)
         .await;
 
-    assert_eq!(ed.engine.state.cursor.col, 11, "C-x d moved to line end (before newline)");
+    assert_eq!(
+        ed.engine.state.cursor.col, 11,
+        "C-x d moved to line end (before newline)"
+    );
 }
 
 // ── Emacs C-x C-/ redo ──────────────────────────────────────
