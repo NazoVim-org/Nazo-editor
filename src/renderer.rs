@@ -7,10 +7,12 @@ use crossterm::style::Color;
 use std::io;
 
 /// One visual (display) row produced from wrapping a buffer line.
+#[allow(dead_code)]
 struct VisualLine {
     /// Buffer line number (1-indexed).
     buffer_line: usize,
     /// Starting buffer column of this visual segment.
+    #[allow(dead_code)]
     segment_start_col: usize,
     /// Styled characters to display on this screen row.
     styled_chars: Vec<(char, CellStyle)>,
@@ -20,6 +22,7 @@ pub struct Renderer {
     /// Screen cell buffer for flicker-free diff-based rendering.
     screen: ScreenBuffer,
     /// Cached show_line_numbers for dirty detection.
+    #[allow(dead_code)]
     show_line_numbers: bool,
 }
 
@@ -431,7 +434,7 @@ impl Renderer {
     }
 
     /// Position the hardware cursor at the focused window's cursor position.
-    fn position_cursor(&mut self, window: &Window, state: &EditorState, _total_cols: usize) {
+    fn position_cursor(&mut self, window: &Window, _state: &EditorState, _total_cols: usize) {
         // Calculate screen position from window's cursor
         // For simplicity, use the window's cursor directly
         // In a full implementation, this would account for wrapping

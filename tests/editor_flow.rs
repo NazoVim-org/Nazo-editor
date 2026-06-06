@@ -1078,7 +1078,7 @@ async fn vim_till_char_cross_line() {
 }
 
 #[tokio::test]
-async fn vim_text_object_iW() {
+async fn vim_text_object_i_w() {
     // iw on "hello world" should select "hello" (word)
     let mut ed = test_vim_editor("hello world\n");
     ed.engine.state.cursor.line = 1;

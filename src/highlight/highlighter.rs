@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use syntect::{
     easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxReference, parsing::SyntaxSet,
     util::LinesWithEndings,
@@ -36,15 +37,15 @@ impl Highlighter {
         let syntax = if let Some(path) = file_path {
             if self.cached_syntax_path.as_deref() == Some(path) {
                 self.cached_syntax
-                    .as_ref()
+                    .as_deref()
                     .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text())
             } else {
                 let s = file_path
                     .and_then(|p| self.syntax_set.find_syntax_for_file(p).ok().flatten())
                     .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text());
                 self.cached_syntax_path = Some(path.to_path_buf());
-                self.cached_syntax = Some(s.clone());
-                self.cached_syntax.as_ref().unwrap()
+                self.cached_syntax = Some(Arc::new(s.clone()));
+                self.cached_syntax.as_deref().unwrap()
             }
         } else {
             self.syntax_set.find_syntax_plain_text()

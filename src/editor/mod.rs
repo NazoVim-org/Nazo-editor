@@ -8,8 +8,6 @@ pub(crate) mod search;
 pub(crate) mod text_object;
 pub(crate) mod visual;
 
-use std::collections::VecDeque;
-
 use crate::buffer::TextBuffer;
 use crate::config::Config;
 use crate::engine::{Engine, EngineResult};
@@ -20,6 +18,8 @@ use crate::terminal::Terminal;
 use crate::types::{EditorState, Keymap, MessageLevel, Mode, Position, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use std::cell::RefCell;
+#[allow(unused_imports)]
+use std::collections::VecDeque;
 use std::io;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
