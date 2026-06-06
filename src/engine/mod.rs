@@ -317,8 +317,8 @@ impl Engine {
     pub fn buffer_open(&mut self, path: &str) -> Result<(), String> {
         use std::path::Path;
         let p = Path::new(path).to_path_buf();
-        let content = std::fs::read_to_string(&p)
-            .map_err(|e| format!("Cannot read '{}': {}", path, e))?;
+        let content =
+            std::fs::read_to_string(&p).map_err(|e| format!("Cannot read '{}': {}", path, e))?;
         let mut new_buffer = TextBuffer::new();
         new_buffer.set_file_path(Some(p.clone()));
         new_buffer.insert(1, 0, &content);

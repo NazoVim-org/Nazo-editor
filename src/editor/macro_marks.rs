@@ -23,9 +23,10 @@ impl Editor {
         let keys = self.engine.state.macros.get(name).cloned();
         if let Some(keys) = keys {
             if !self.engine.state.macros.enter_playback() {
-                self.engine
-                    .state
-                    .push_message(MessageLevel::Warning, "Macro recursion limit exceeded (20)".to_string());
+                self.engine.state.push_message(
+                    MessageLevel::Warning,
+                    "Macro recursion limit exceeded (20)".to_string(),
+                );
                 self.needs_render = true;
                 return;
             }
@@ -50,7 +51,9 @@ impl Editor {
                     match self.engine.state.mode {
                         Mode::Normal => Box::pin(self.handle_normal(key)),
                         Mode::Insert => Box::pin(self.handle_insert(key)),
-                        Mode::Command => Box::pin(self.handle_command(key, crossterm::event::KeyModifiers::empty())),
+                        Mode::Command => Box::pin(
+                            self.handle_command(key, crossterm::event::KeyModifiers::empty()),
+                        ),
                         Mode::Visual => Box::pin(self.handle_visual(key)),
                         Mode::Replace => Box::pin(self.handle_replace(key)),
                     };

@@ -58,9 +58,7 @@ impl Editor {
             }
         }
 
-        self.engine.dot_last_action = Some(crate::types::DotAction::Indent {
-            unindent: !indent,
-        });
+        self.engine.dot_last_action = Some(crate::types::DotAction::Indent { unindent: !indent });
         self.needs_render = true;
     }
 
@@ -255,10 +253,10 @@ impl Editor {
     /// Handle `iW` (inner WORD) and `aW` (a WORD) text objects.
     /// WORDs are whitespace-delimited sequences (Vim's `W`/`B`).
     fn handle_word_text_object(&mut self, register: char, inner: bool) {
-        let (word, start, end) = self.engine.buffer.get_word_range_upper(
-            self.engine.state.cursor.line,
-            self.engine.state.cursor.col,
-        );
+        let (word, start, end) = self
+            .engine
+            .buffer
+            .get_word_range_upper(self.engine.state.cursor.line, self.engine.state.cursor.col);
         if word.is_empty() {
             return;
         }

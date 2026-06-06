@@ -91,7 +91,7 @@ impl KeymapHandler for VimKeymap {
                             return;
                         }
                         _ => {}
-                    }
+                    },
                     Mode::Insert | Mode::Replace => match key {
                         KeyCode::Char('d') => {
                             editor.insert_delete_to_bol();
@@ -113,7 +113,7 @@ impl KeymapHandler for VimKeymap {
                             return;
                         }
                         _ => {}
-                    }
+                    },
                     Mode::Command | Mode::Visual => {}
                 }
             }

@@ -1073,8 +1073,14 @@ async fn vim_till_char_cross_line() {
         .await;
     let (_, line, col, _) = ed.snapshot_for_test();
     // t forward to next line: cursor ends up at end of line 1
-    assert_eq!(line, 1, "cross-line t should be on line 1 (before line 2 char)");
-    assert_eq!(col, 3, "till char should be at col 3 (before 'o' on line 2)");
+    assert_eq!(
+        line, 1,
+        "cross-line t should be on line 1 (before line 2 char)"
+    );
+    assert_eq!(
+        col, 3,
+        "till char should be at col 3 (before 'o' on line 2)"
+    );
 }
 
 #[tokio::test]
@@ -1123,7 +1129,11 @@ async fn vim_replace_mode_undo_group() {
         .await;
 
     let (buf, _, _, _) = ed.snapshot_for_test();
-    assert_eq!(buf.trim(), "abc", "undo after replace should restore original");
+    assert_eq!(
+        buf.trim(),
+        "abc",
+        "undo after replace should restore original"
+    );
 }
 
 #[tokio::test]
@@ -1134,7 +1144,11 @@ async fn vim_dot_repeat_join() {
     ed.handle_key_for_test(KeyCode::Char('J'), KeyModifiers::NONE)
         .await;
     let (buf, _, _, _) = ed.snapshot_for_test();
-    assert!(buf.starts_with("line1 line2"), "J should join: got {:?}", buf);
+    assert!(
+        buf.starts_with("line1 line2"),
+        "J should join: got {:?}",
+        buf
+    );
 
     // Move to beginning of current line first, then . to repeat
     ed.handle_key_for_test(KeyCode::Char('0'), KeyModifiers::NONE)
@@ -1191,11 +1205,7 @@ async fn vim_multibuffer_switch() {
     // Switch to next buffer
     ed.engine.buffer_next().unwrap();
     let (buf, _, _, _) = ed.snapshot_for_test();
-    assert_eq!(
-        buf.trim(),
-        "buffer2 content",
-        "bn should switch to buffer2"
-    );
+    assert_eq!(buf.trim(), "buffer2 content", "bn should switch to buffer2");
 
     // Switch back
     ed.engine.buffer_prev().unwrap();
@@ -1224,8 +1234,14 @@ async fn vim_dot_repeat_indent() {
     let (buf, _, _, _) = ed.snapshot_for_test();
     // Both lines should be indented (tab or spaces depending on expandtab)
     let lines: Vec<&str> = buf.lines().collect();
-    assert!(lines[0].chars().next() == Some('\t') || lines[0].starts_with("    "), "line1 should be indented");
-    assert!(lines[1].chars().next() == Some('\t') || lines[1].starts_with("    "), "line2 should be indented by dot repeat");
+    assert!(
+        lines[0].chars().next() == Some('\t') || lines[0].starts_with("    "),
+        "line1 should be indented"
+    );
+    assert!(
+        lines[1].chars().next() == Some('\t') || lines[1].starts_with("    "),
+        "line2 should be indented by dot repeat"
+    );
 }
 
 #[tokio::test]
@@ -1282,5 +1298,8 @@ async fn vim_command_line_ctrl_w() {
     ed.handle_key_for_test(KeyCode::Char('w'), KeyModifiers::CONTROL)
         .await;
 
-    assert_eq!(ed.engine.state.command_buffer, "foo", "Ctrl-w should delete ' bar'");
+    assert_eq!(
+        ed.engine.state.command_buffer, "foo",
+        "Ctrl-w should delete ' bar'"
+    );
 }

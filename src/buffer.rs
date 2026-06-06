@@ -53,8 +53,6 @@ impl TextBuffer {
         self.doc.line(line_number - 1).chars().count()
     }
 
-
-
     pub fn insert(&mut self, line: usize, col: usize, text: &str) {
         let line_idx = line.saturating_sub(1);
         if line_idx >= self.doc.len_lines() {

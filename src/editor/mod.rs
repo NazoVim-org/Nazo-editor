@@ -270,13 +270,14 @@ impl Editor {
     pub fn switch_keymap(&mut self, name: &str) {
         let keymap = match name {
             "vim" => Keymap::Vim,
-        "emacs" => Keymap::Emacs,
-        _ => {
-            self.engine
-                .state
-                .push_message(MessageLevel::Warning, format!("Unknown keymap: {} (use vim or emacs)", name));
-            return;
-        }
+            "emacs" => Keymap::Emacs,
+            _ => {
+                self.engine.state.push_message(
+                    MessageLevel::Warning,
+                    format!("Unknown keymap: {} (use vim or emacs)", name),
+                );
+                return;
+            }
         };
         self.keymap_handler = create_keymap(keymap);
         self.engine.reset_state_for_keymap_switch();

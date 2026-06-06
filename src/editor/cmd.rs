@@ -78,9 +78,12 @@ impl Editor {
                         self.needs_render = true;
                     }
                     "messages" => {
-                        let history: Vec<_> = self.engine.state.message_history.iter().cloned().collect();
+                        let history: Vec<_> =
+                            self.engine.state.message_history.iter().cloned().collect();
                         if history.is_empty() {
-                            self.engine.state.push_message(MessageLevel::Info, "No messages".to_string());
+                            self.engine
+                                .state
+                                .push_message(MessageLevel::Info, "No messages".to_string());
                         } else {
                             // Display all messages in history
                             for msg in history {
@@ -89,7 +92,9 @@ impl Editor {
                                     MessageLevel::Warning => "[WARN]",
                                     MessageLevel::Info => "[INFO]",
                                 };
-                                self.engine.state.push_message(msg.level, format!("{} {}", prefix, msg.text));
+                                self.engine
+                                    .state
+                                    .push_message(msg.level, format!("{} {}", prefix, msg.text));
                             }
                         }
                     }
@@ -127,9 +132,10 @@ impl Editor {
                                 vec![]
                             };
                             if !self.engine.plugin_manager.execute_command(cmd_name, args) {
-                                self.engine
-                                    .state
-                                    .push_message(MessageLevel::Warning, format!("Unknown command: {}", cmd));
+                                self.engine.state.push_message(
+                                    MessageLevel::Warning,
+                                    format!("Unknown command: {}", cmd),
+                                );
                             }
                         }
                     }
@@ -273,7 +279,9 @@ impl Editor {
                     return;
                 }
                 if let Err(e) = self.engine.buffer.save_file().await {
-                    self.engine.state.push_message(MessageLevel::Error, format!("Save failed: {}", e));
+                    self.engine
+                        .state
+                        .push_message(MessageLevel::Error, format!("Save failed: {}", e));
                 } else {
                     self.engine
                         .plugin_manager
@@ -363,9 +371,10 @@ impl Editor {
                 }
             }
             _ => {
-                self.engine
-                    .state
-                    .push_message(MessageLevel::Warning, format!("Unknown set option: {}", args));
+                self.engine.state.push_message(
+                    MessageLevel::Warning,
+                    format!("Unknown set option: {}", args),
+                );
             }
         }
     }
@@ -378,18 +387,20 @@ impl Editor {
         } else if cmd.starts_with("s/") {
             (".", &cmd[2..])
         } else {
-            self.engine
-                .state
-                .push_message(MessageLevel::Warning, "Invalid substitute command".to_string());
+            self.engine.state.push_message(
+                MessageLevel::Warning,
+                "Invalid substitute command".to_string(),
+            );
             return;
         };
 
         // Split into pattern / replacement / flags.
         let parts: Vec<&str> = rest.splitn(3, '/').collect();
         if parts.len() < 2 {
-            self.engine
-                .state
-                .push_message(MessageLevel::Warning, "Invalid substitute syntax".to_string());
+            self.engine.state.push_message(
+                MessageLevel::Warning,
+                "Invalid substitute syntax".to_string(),
+            );
             return;
         }
         let pattern_str = parts[0];
@@ -471,12 +482,15 @@ impl Editor {
         }
 
         self.engine.state.dirty = self.engine.buffer.is_dirty();
-        self.engine.state.push_message(MessageLevel::Info, format!(
-            "{} substitutions on {} line{}",
-            replacements,
-            if range == "%" { "all" } else { "1" },
-            if replacements == 1 { "" } else { "s" }
-        ));
+        self.engine.state.push_message(
+            MessageLevel::Info,
+            format!(
+                "{} substitutions on {} line{}",
+                replacements,
+                if range == "%" { "all" } else { "1" },
+                if replacements == 1 { "" } else { "s" }
+            ),
+        );
         self.needs_render = true;
     }
 
@@ -519,7 +533,9 @@ impl Editor {
                     });
             }
             Err(e) => {
-                self.engine.state.push_message(MessageLevel::Error, format!("Save failed: {}", e));
+                self.engine
+                    .state
+                    .push_message(MessageLevel::Error, format!("Save failed: {}", e));
             }
         }
     }
@@ -527,7 +543,9 @@ impl Editor {
     async fn handle_write_path(&mut self, cmd: &str) {
         let path_str = cmd.trim_start_matches("w!").trim_start_matches("w ").trim();
         if path_str.is_empty() {
-            self.engine.state.push_message(MessageLevel::Warning, "Expected filename after 'w'");
+            self.engine
+                .state
+                .push_message(MessageLevel::Warning, "Expected filename after 'w'");
             return;
         }
         let path = std::path::PathBuf::from(path_str);
@@ -541,7 +559,9 @@ impl Editor {
                     });
             }
             Err(e) => {
-                self.engine.state.push_message(MessageLevel::Error, format!("Save failed: {}", e));
+                self.engine
+                    .state
+                    .push_message(MessageLevel::Error, format!("Save failed: {}", e));
             }
         }
     }
@@ -569,7 +589,9 @@ impl Editor {
                 self.running = false;
             }
             Err(e) => {
-                self.engine.state.push_message(MessageLevel::Error, format!("Save failed: {}", e));
+                self.engine
+                    .state
+                    .push_message(MessageLevel::Error, format!("Save failed: {}", e));
             }
         }
     }

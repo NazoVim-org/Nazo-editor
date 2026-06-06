@@ -87,7 +87,10 @@ impl Editor {
             }
             KeyCode::Char('l') => {
                 let count = self.take_count();
-                let line_len = self.engine.buffer.line_char_len(self.engine.state.cursor.line);
+                let line_len = self
+                    .engine
+                    .buffer
+                    .line_char_len(self.engine.state.cursor.line);
                 self.engine.state.cursor.col =
                     (self.engine.state.cursor.col + count).min(line_len.saturating_sub(1));
                 self.needs_render = true;
@@ -96,7 +99,10 @@ impl Editor {
                 let count = self.take_count();
                 self.engine.state.cursor.line =
                     (self.engine.state.cursor.line + count).min(line_count);
-                let len = self.engine.buffer.line_char_len(self.engine.state.cursor.line);
+                let len = self
+                    .engine
+                    .buffer
+                    .line_char_len(self.engine.state.cursor.line);
                 self.engine.state.cursor.col =
                     self.engine.state.cursor.col.min(len.saturating_sub(1));
                 self.needs_render = true;
@@ -105,7 +111,10 @@ impl Editor {
                 let count = self.take_count();
                 self.engine.state.cursor.line =
                     self.engine.state.cursor.line.saturating_sub(count).max(1);
-                let len = self.engine.buffer.line_char_len(self.engine.state.cursor.line);
+                let len = self
+                    .engine
+                    .buffer
+                    .line_char_len(self.engine.state.cursor.line);
                 self.engine.state.cursor.col =
                     self.engine.state.cursor.col.min(len.saturating_sub(1));
                 self.needs_render = true;
@@ -128,7 +137,10 @@ impl Editor {
                 self.engine.insert_state.accum.clear();
                 self.engine.insert_state.start_pos = Some(self.engine.state.cursor);
                 if self.engine.state.cursor.col
-                    < self.engine.buffer.line_char_len(self.engine.state.cursor.line)
+                    < self
+                        .engine
+                        .buffer
+                        .line_char_len(self.engine.state.cursor.line)
                 {
                     self.engine.state.cursor.col += 1;
                 }
@@ -144,7 +156,10 @@ impl Editor {
                 let prev_mode = self.engine.state.mode;
                 self.engine.insert_state.accum.clear();
                 self.engine.insert_state.start_pos = Some(self.engine.state.cursor);
-                let line_len = self.engine.buffer.line_char_len(self.engine.state.cursor.line);
+                let line_len = self
+                    .engine
+                    .buffer
+                    .line_char_len(self.engine.state.cursor.line);
                 self.engine.state.cursor.col = line_len;
                 self.engine.state.mode = Mode::Insert;
                 self.engine.plugin_manager.emit(PluginEvent::ModeChange {
@@ -523,7 +538,10 @@ impl Editor {
                         let count = self.take_count();
                         for _ in 0..count {
                             self.toggle_case_char();
-                            let line_len = self.engine.buffer.line_char_len(self.engine.state.cursor.line);
+                            let line_len = self
+                                .engine
+                                .buffer
+                                .line_char_len(self.engine.state.cursor.line);
                             self.engine.state.cursor.col =
                                 (self.engine.state.cursor.col + 1).min(line_len.saturating_sub(1));
                         }
@@ -755,14 +773,24 @@ impl Editor {
                 } else if let KeyCode::Char('-') = key {
                     // g- : switch to older undo branch
                     if let Some(parent) = self.engine.undo_manager.parent_node() {
-                        if self.engine.undo_manager.switch_branch(&mut self.engine.buffer, parent).is_some() {
+                        if self
+                            .engine
+                            .undo_manager
+                            .switch_branch(&mut self.engine.buffer, parent)
+                            .is_some()
+                        {
                             self.needs_render = true;
                         }
                     }
                 } else if let KeyCode::Char('+') = key {
                     // g+ : switch to newer undo branch
                     if let Some(child) = self.engine.undo_manager.first_child_node() {
-                        if self.engine.undo_manager.switch_branch(&mut self.engine.buffer, child).is_some() {
+                        if self
+                            .engine
+                            .undo_manager
+                            .switch_branch(&mut self.engine.buffer, child)
+                            .is_some()
+                        {
                             self.needs_render = true;
                         }
                     }
@@ -864,7 +892,10 @@ impl Editor {
         if line > line_count {
             self.engine.state.cursor.line = line_count.max(1);
         }
-        let len = self.engine.buffer.line_char_len(self.engine.state.cursor.line);
+        let len = self
+            .engine
+            .buffer
+            .line_char_len(self.engine.state.cursor.line);
         self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
         self.on_buffer_modified();
     }
@@ -904,9 +935,11 @@ impl Editor {
                         self.engine
                             .buffer
                             .insert(self.engine.state.cursor.line, 0, line);
-                        self.engine
-                            .buffer
-                            .insert(self.engine.state.cursor.line, line.chars().count(), "\n");
+                        self.engine.buffer.insert(
+                            self.engine.state.cursor.line,
+                            line.chars().count(),
+                            "\n",
+                        );
                     } else {
                         self.engine.buffer.insert(
                             self.engine.state.cursor.line,
@@ -922,13 +955,14 @@ impl Editor {
                 } else {
                     let insert_line = self.engine.state.cursor.line + i;
                     self.engine.buffer.insert(insert_line, 0, line);
-                    self.engine.buffer.insert(insert_line, line.chars().count(), "\n");
+                    self.engine
+                        .buffer
+                        .insert(insert_line, line.chars().count(), "\n");
                 }
             }
             if before {
                 self.engine.state.cursor.line += lines.len() - 1;
-                self.engine.state.cursor.col =
-                    lines.last().map(|l| l.chars().count()).unwrap_or(0);
+                self.engine.state.cursor.col = lines.last().map(|l| l.chars().count()).unwrap_or(0);
             } else {
                 self.engine.state.cursor.line += lines.len() - 1;
                 let last_line = lines.last().unwrap();
@@ -1180,7 +1214,9 @@ impl Editor {
             KeyCode::Char('w') => {
                 // Ctrl-w w: next window
                 if let Err(e) = self.engine.focus_next_window() {
-                    self.engine.state.push_message(crate::types::MessageLevel::Error, e);
+                    self.engine
+                        .state
+                        .push_message(crate::types::MessageLevel::Error, e);
                 }
             }
             KeyCode::Char('j') => {
@@ -1202,7 +1238,9 @@ impl Editor {
             KeyCode::Char('c') => {
                 // Ctrl-w c: close window
                 if let Err(e) = self.engine.close_focused_window() {
-                    self.engine.state.push_message(crate::types::MessageLevel::Error, e);
+                    self.engine
+                        .state
+                        .push_message(crate::types::MessageLevel::Error, e);
                 }
             }
             KeyCode::Char('=') => {
@@ -1226,18 +1264,25 @@ impl Editor {
             KeyCode::Char('s') => {
                 // Ctrl-w s: split horizontal (same as :split)
                 if let Err(e) = self.engine.split_horizontal() {
-                    self.engine.state.push_message(crate::types::MessageLevel::Error, e);
+                    self.engine
+                        .state
+                        .push_message(crate::types::MessageLevel::Error, e);
                 }
             }
             KeyCode::Char('v') => {
                 // Ctrl-w v: split vertical (same as :vsplit)
                 if let Err(e) = self.engine.split_vertical() {
-                    self.engine.state.push_message(crate::types::MessageLevel::Error, e);
+                    self.engine
+                        .state
+                        .push_message(crate::types::MessageLevel::Error, e);
                 }
             }
             _ => {
                 // Unknown Ctrl-w subcommand
-                self.engine.state.push_message(crate::types::MessageLevel::Warning, format!("Unknown Ctrl-w subcommand: {:?}", key));
+                self.engine.state.push_message(
+                    crate::types::MessageLevel::Warning,
+                    format!("Unknown Ctrl-w subcommand: {:?}", key),
+                );
             }
         }
         self.needs_render = true;
