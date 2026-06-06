@@ -1,6 +1,261 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::time::Instant;
 use thiserror::Error;
+
+/// Message severity level for UI display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MessageLevel {
+    #[default]
+    Info,
+    Warning,
+    Error,
+}
+
+/// A structured message with level and timestamp.
+#[derive(Debug, Clone)]
+pub struct EditorMessage {
+    pub text: String,
+    pub level: MessageLevel,
+    pub timestamp: Instant,
+}
+
+/// Window split direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitDirection {
+    Horizontal,
+    Vertical,
+}
+
+/// A window viewport within the terminal.
+#[derive(Debug, Clone)]
+pub struct Window {
+    /// Top row (0-indexed, inclusive).
+    pub row_start: usize,
+    /// Bottom row (exclusive).
+    pub row_end: usize,
+    /// Left column (0-indexed, inclusive).
+    pub col_start: usize,
+    /// Right column (exclusive).
+    pub col_end: usize,
+    /// Buffer line at the top of this window (1-indexed).
+    pub scroll_top: usize,
+    /// Cursor position within this window.
+    pub cursor: Position,
+    /// Which buffer this window shows (0 = active, 1.. = inactive_buffers index).
+    pub buf_idx: usize,
+}
+
+/// Layout of all windows.
+#[derive(Debug, Clone, Default)]
+pub struct WindowLayout {
+    pub windows: Vec<Window>,
+    /// Index of the currently focused window.
+    pub focused: usize,
+}
+
+impl WindowLayout {
+    /// Create a new layout with a single full-screen window.
+    pub fn new_single(rows: usize, cols: usize) -> Self {
+        // Reserve last row for status bar
+        let content_rows = rows.saturating_sub(1);
+        Self {
+            windows: vec![Window {
+                row_start: 0,
+                row_end: content_rows,
+                col_start: 0,
+                col_end: cols,
+                scroll_top: 1,
+                cursor: Position { line: 1, col: 0 },
+                buf_idx: 0,
+            }],
+            focused: 0,
+        }
+    }
+
+    /// Split the focused window horizontally (top/bottom).
+    pub fn split_horizontal(&mut self) {
+        let focused_idx = self.focused;
+        let window = self.windows[focused_idx].clone();
+
+        // Calculate new heights
+        let height = window.row_end - window.row_start;
+        let top_height = height / 2;
+        let _bottom_height = height - top_height;
+
+        // Top window keeps the top portion
+        self.windows[focused_idx].row_end = window.row_start + top_height;
+
+        // Bottom window gets the bottom portion
+        let mut new_window = window.clone();
+        new_window.row_start = self.windows[focused_idx].row_end;
+        new_window.row_end = window.row_end;
+        new_window.scroll_top = window.scroll_top;
+        new_window.cursor = window.cursor;
+
+        self.windows.insert(focused_idx + 1, new_window);
+        self.focused = focused_idx + 1;
+    }
+
+    /// Split the focused window vertically (left/right).
+    pub fn split_vertical(&mut self) {
+        let focused_idx = self.focused;
+        let window = self.windows[focused_idx].clone();
+
+        // Calculate new widths
+        let width = window.col_end - window.col_start;
+        let left_width = width / 2;
+        let _right_width = width - left_width;
+
+        // Left window keeps the left portion
+        self.windows[focused_idx].col_end = window.col_start + left_width;
+
+        // Right window gets the right portion
+        let mut new_window = window.clone();
+        new_window.col_start = self.windows[focused_idx].col_end;
+        new_window.col_end = window.col_end;
+        new_window.scroll_top = window.scroll_top;
+        new_window.cursor = window.cursor;
+
+        self.windows.insert(focused_idx + 1, new_window);
+        self.focused = focused_idx + 1;
+    }
+
+    /// Close the focused window. If it's the last window, do nothing.
+    pub fn close_focused(&mut self) {
+        if self.windows.len() <= 1 {
+            return;
+        }
+        self.windows.remove(self.focused);
+        if self.focused >= self.windows.len() {
+            self.focused = self.windows.len() - 1;
+        }
+    }
+
+    /// Focus the next window (wrap around).
+    pub fn focus_next(&mut self) {
+        if !self.windows.is_empty() {
+            self.focused = (self.focused + 1) % self.windows.len();
+        }
+    }
+
+    /// Focus the window in the given direction from the focused window.
+    pub fn focus_direction(&mut self, direction: Direction) {
+        let focused = &self.windows[self.focused];
+        let mut best_idx = None;
+        let mut best_dist = usize::MAX;
+
+        for (i, w) in self.windows.iter().enumerate() {
+            if i == self.focused {
+                continue;
+            }
+            let dist = match direction {
+                Direction::Up => {
+                    if w.row_end <= focused.row_start {
+                        focused.row_start - w.row_end
+                    } else {
+                        continue;
+                    }
+                }
+                Direction::Down => {
+                    if w.row_start >= focused.row_end {
+                        w.row_start - focused.row_end
+                    } else {
+                        continue;
+                    }
+                }
+                Direction::Left => {
+                    if w.col_end <= focused.col_start {
+                        focused.col_start - w.col_end
+                    } else {
+                        continue;
+                    }
+                }
+                Direction::Right => {
+                    if w.col_start >= focused.col_end {
+                        w.col_start - focused.col_end
+                    } else {
+                        continue;
+                    }
+                }
+            };
+            if dist < best_dist {
+                best_dist = dist;
+                best_idx = Some(i);
+            }
+        }
+        if let Some(idx) = best_idx {
+            self.focused = idx;
+        }
+    }
+
+    /// Equalize all window sizes.
+    pub fn equalize(&mut self, total_rows: usize, total_cols: usize) {
+        let content_rows = total_rows.saturating_sub(1);
+        let n = self.windows.len();
+        if n == 0 {
+            return;
+        }
+
+        // Check if layout is primarily horizontal or vertical
+        let horizontal = self
+            .windows
+            .iter()
+            .any(|w| w.row_start != 0 || w.row_end != content_rows);
+
+        if horizontal {
+            // Horizontal layout: equalize heights
+            let base_height = content_rows / n;
+            let extra = content_rows % n;
+            let mut row = 0;
+            for (i, w) in self.windows.iter_mut().enumerate() {
+                let h = base_height + if i < extra { 1 } else { 0 };
+                w.row_start = row;
+                w.row_end = row + h;
+                row += h;
+                w.col_start = 0;
+                w.col_end = total_cols;
+            }
+        } else {
+            // Vertical layout: equalize widths
+            let base_width = total_cols / n;
+            let extra = total_cols % n;
+            let mut col = 0;
+            for (i, w) in self.windows.iter_mut().enumerate() {
+                let w_w = base_width + if i < extra { 1 } else { 0 };
+                w.col_start = col;
+                w.col_end = col + w_w;
+                col += w_w;
+                w.row_start = 0;
+                w.row_end = content_rows;
+            }
+        }
+    }
+
+    /// Maximize focused window vertically.
+    pub fn maximize_vertical(&mut self, total_rows: usize, _total_cols: usize) {
+        let content_rows = total_rows.saturating_sub(1);
+        let focused = &mut self.windows[self.focused];
+        focused.row_start = 0;
+        focused.row_end = content_rows;
+    }
+
+    /// Maximize focused window horizontally.
+    pub fn maximize_horizontal(&mut self, _total_rows: usize, total_cols: usize) {
+        let focused = &mut self.windows[self.focused];
+        focused.col_start = 0;
+        focused.col_end = total_cols;
+    }
+}
+
+/// Direction for window navigation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
 
 /// Crate-wide error type.
 ///
@@ -131,9 +386,13 @@ impl Marks {
 pub struct Macros {
     macros: HashMap<char, Vec<String>>,
     recording: Option<char>,
+    /// Recursion depth guard — prevents infinite macro loops.
+    depth: usize,
 }
 
 impl Macros {
+    const MAX_DEPTH: usize = 20;
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -144,6 +403,14 @@ impl Macros {
     }
 
     pub fn stop_recording(&mut self) -> Option<char> {
+        // Pop the last recorded key — it's always the `q` that
+        // triggered the stop, emitted by the keymap handler before
+        // `handle_normal` had a chance to check `is_recording()`.
+        if let Some(name) = self.recording {
+            if let Some(keys) = self.macros.get_mut(&name) {
+                keys.pop();
+            }
+        }
         self.recording.take()
     }
 
@@ -161,6 +428,20 @@ impl Macros {
 
     pub fn is_recording(&self) -> bool {
         self.recording.is_some()
+    }
+
+    /// Try to enter macro playback. Returns `false` if depth limit exceeded.
+    pub fn enter_playback(&mut self) -> bool {
+        if self.depth >= Self::MAX_DEPTH {
+            return false;
+        }
+        self.depth += 1;
+        true
+    }
+
+    /// Exit macro playback, decrementing the recursion depth.
+    pub fn exit_playback(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
     }
 }
 
@@ -189,16 +470,32 @@ pub struct EditorState {
     pub file_path: Option<PathBuf>,
     pub dirty: bool,
     pub command_buffer: String,
+    /// Cursor position within `command_buffer` (byte index).
+    pub command_cursor_pos: usize,
     pub last_message: Option<String>,
     pub visual_start: Option<Position>,
     pub visual_type: Option<VisualType>,
+    pub last_visual_start: Option<Position>,
+    pub last_visual_type: Option<VisualType>,
     pub marks: Marks,
     pub macros: Macros,
     pub confirmation_prompt: Option<ConfirmationPrompt>,
     pub show_line_numbers: bool,
+    pub show_relative_numbers: bool,
+    pub hlsearch: bool,
     pub wrap: bool,
     pub mark: Option<Position>,
     pub region_active: bool,
+    /// Display width of a tab character (default: 8).
+    pub tabstop: usize,
+    /// Number of spaces for each indentation level (default: 4).
+    pub shiftwidth: usize,
+    /// Insert spaces instead of tab characters (default: false).
+    pub expandtab: bool,
+    /// Number of lines to keep visible above/below cursor (default: 0).
+    pub scrolloff: usize,
+    /// Message history (max 100 entries).
+    pub message_history: VecDeque<EditorMessage>,
 }
 
 impl Default for EditorState {
@@ -209,16 +506,26 @@ impl Default for EditorState {
             file_path: None,
             dirty: false,
             command_buffer: String::new(),
+            command_cursor_pos: 0,
             last_message: None,
             visual_start: None,
             visual_type: None,
+            last_visual_start: None,
+            last_visual_type: None,
             marks: Marks::new(),
             macros: Macros::new(),
             confirmation_prompt: None,
             show_line_numbers: true,
+            show_relative_numbers: false,
+            hlsearch: true,
             wrap: true,
             mark: None,
             region_active: false,
+            tabstop: 8,
+            shiftwidth: 4,
+            expandtab: false,
+            scrolloff: 0,
+            message_history: VecDeque::new(),
         }
     }
 }
@@ -250,6 +557,7 @@ pub enum ConfirmAction {
     Quit,
     QuitDiscard,
     WriteQuitAll,
+    ReloadDiscard,
 }
 
 #[derive(Clone, Debug)]
@@ -274,7 +582,22 @@ impl EditorState {
     /// Set a transient message (error/status) displayed in the status line.
     /// Shown until the next key press replaces it.
     pub fn set_message(&mut self, msg: impl Into<String>) {
-        self.last_message = Some(msg.into());
+        self.push_message(MessageLevel::Info, msg);
+    }
+
+    /// Push a message with a specific level to history and status line.
+    pub fn push_message(&mut self, level: MessageLevel, msg: impl Into<String>) {
+        let text = msg.into();
+        self.last_message = Some(text.clone());
+        self.message_history.push_back(EditorMessage {
+            text,
+            level,
+            timestamp: Instant::now(),
+        });
+        // Limit history to 100 entries.
+        if self.message_history.len() > 100 {
+            self.message_history.pop_front();
+        }
     }
 
     /// Clear the transient message.
@@ -369,4 +692,15 @@ pub enum DotAction {
         line: usize,
         col: usize,
     },
+    Replace {
+        ch: char,
+    },
+    /// `J` — join current line with next.
+    Join,
+    /// `>>` or `<<` — indent or unindent a line.
+    Indent {
+        unindent: bool,
+    },
+    /// `~` — toggle case of character under cursor.
+    ToggleCase,
 }

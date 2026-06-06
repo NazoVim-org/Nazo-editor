@@ -15,9 +15,11 @@ use crate::keymap::{create_keymap, KeymapHandler};
 use crate::plugin::PluginManager;
 use crate::renderer::Renderer;
 use crate::terminal::Terminal;
-use crate::types::{EditorState, Keymap, Mode, Position, Result};
+use crate::types::{EditorState, Keymap, MessageLevel, Mode, Position, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use std::cell::RefCell;
+#[allow(unused_imports)]
+use std::collections::VecDeque;
 use std::io;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -58,7 +60,7 @@ impl Editor {
             self.running = running;
         }
         if let Some(msg) = r.message {
-            self.engine.state.set_message(msg);
+            self.engine.state.push_message(MessageLevel::Info, msg);
         }
         if let Some((msg, action)) = r.confirmation {
             self.engine.state.set_confirmation(msg, action);
@@ -125,6 +127,7 @@ impl Editor {
             file_path: buffer.file_path().map(|p| p.to_path_buf()),
             cursor: Position { line: 1, col: 0 },
             show_line_numbers: cfg.show_line_numbers,
+            show_relative_numbers: cfg.show_relative_numbers,
             wrap: cfg.wrap,
             ..EditorState::default()
         };
@@ -145,12 +148,14 @@ impl Editor {
         if let Err(e) = self.renderer.render(
             &mut self.terminal,
             &self.engine.buffer,
+            &self.engine.inactive_buffers,
             &self.engine.state,
+            &self.engine.window_layout,
             &self.engine.highlights,
         ) {
             self.engine
                 .state
-                .set_message(format!("Render error: {}", e));
+                .push_message(MessageLevel::Error, format!("Render error: {}", e));
         }
         self.needs_render = false;
 
@@ -169,13 +174,16 @@ impl Editor {
                     Ok(Event::Resize(_, _)) => {
                         self.terminal.update_size();
                         self.terminal.clear_cache();
+                        let rows = self.terminal.rows() as usize;
+                        let cols = self.terminal.cols() as usize;
+                        self.engine.update_window_layout(rows, cols);
                         self.needs_render = true;
                     }
                     Ok(_) => {}
                     Err(e) => {
                         self.engine
                             .state
-                            .set_message(format!("Event read error: {}", e));
+                            .push_message(MessageLevel::Error, format!("Event read error: {}", e));
                     }
                 }
             }
@@ -199,12 +207,14 @@ impl Editor {
                 if let Err(e) = self.renderer.render(
                     &mut self.terminal,
                     &self.engine.buffer,
+                    &self.engine.inactive_buffers,
                     &self.engine.state,
+                    &self.engine.window_layout,
                     &self.engine.highlights,
                 ) {
                     self.engine
                         .state
-                        .set_message(format!("Render error: {}", e));
+                        .push_message(MessageLevel::Error, format!("Render error: {}", e));
                 }
                 self.needs_render = false;
             }
@@ -226,8 +236,8 @@ impl Editor {
 
     /// Emit a key-press event to the plugin system and record macros if recording.
     /// Called by both Vim and Emacs keymap handlers.
-    pub(crate) fn emit_key_event(&mut self, key: KeyCode) {
-        self.engine.emit_key_event(key);
+    pub(crate) fn emit_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) {
+        self.engine.emit_key_event(key, modifiers);
     }
 
     /// Expose count from operator state.
@@ -262,9 +272,10 @@ impl Editor {
             "vim" => Keymap::Vim,
             "emacs" => Keymap::Emacs,
             _ => {
-                self.engine
-                    .state
-                    .set_message(format!("Unknown keymap: {} (use vim or emacs)", name));
+                self.engine.state.push_message(
+                    MessageLevel::Warning,
+                    format!("Unknown keymap: {} (use vim or emacs)", name),
+                );
                 return;
             }
         };
@@ -313,16 +324,26 @@ mod tests {
             file_path: None,
             dirty: false,
             command_buffer: String::new(),
+            command_cursor_pos: 0,
             last_message: None,
             visual_start: None,
             visual_type: None,
+            last_visual_start: None,
+            last_visual_type: None,
             marks: crate::types::Marks::new(),
             macros: crate::types::Macros::new(),
             confirmation_prompt: None,
             show_line_numbers: true,
+            show_relative_numbers: false,
+            hlsearch: true,
             wrap: true,
             mark: None,
             region_active: false,
+            tabstop: 8,
+            shiftwidth: 4,
+            expandtab: false,
+            scrolloff: 0,
+            message_history: VecDeque::new(),
         };
 
         Editor {

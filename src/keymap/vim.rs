@@ -25,11 +25,16 @@ impl KeymapHandler for VimKeymap {
         modifiers: KeyModifiers,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>> {
         Box::pin(async move {
-            editor.emit_key_event(key);
+            editor.emit_key_event(key, modifiers);
 
             if modifiers.contains(KeyModifiers::CONTROL) {
                 match editor.engine.state.mode {
-                    Mode::Normal | Mode::Insert | Mode::Replace => match key {
+                    Mode::Normal => match key {
+                        KeyCode::Char('w') => {
+                            // Ctrl-w prefix: enter Ctrl-w prefix mode
+                            editor.engine.operator_state.ctrl_w_prefix = true;
+                            return;
+                        }
                         KeyCode::Char('d') => {
                             editor.scroll_by(editor.terminal.rows() as usize / 2, true);
                             editor.needs_render = true;
@@ -37,6 +42,11 @@ impl KeymapHandler for VimKeymap {
                         }
                         KeyCode::Char('u') => {
                             editor.scroll_by(editor.terminal.rows() as usize / 2, false);
+                            editor.needs_render = true;
+                            return;
+                        }
+                        KeyCode::Char('r') => {
+                            editor.redo();
                             editor.needs_render = true;
                             return;
                         }
@@ -52,11 +62,6 @@ impl KeymapHandler for VimKeymap {
                         }
                         KeyCode::Char('g') => {
                             editor.show_file_info();
-                            editor.needs_render = true;
-                            return;
-                        }
-                        KeyCode::Char('r') => {
-                            editor.redo();
                             editor.needs_render = true;
                             return;
                         }
@@ -87,7 +92,29 @@ impl KeymapHandler for VimKeymap {
                         }
                         _ => {}
                     },
-                    _ => {}
+                    Mode::Insert | Mode::Replace => match key {
+                        KeyCode::Char('d') => {
+                            editor.insert_delete_to_bol();
+                            return;
+                        }
+                        KeyCode::Char('w') => {
+                            // Ctrl-w: delete word backward in Insert mode
+                            editor.insert_delete_word_backward();
+                            return;
+                        }
+                        KeyCode::Char('r') => {
+                            // Insert: insert register (Ctrl-r)
+                            editor.engine.insert_state.waiting_register = true;
+                            editor.needs_render = true;
+                            return;
+                        }
+                        KeyCode::Char('u') => {
+                            editor.insert_delete_to_bol();
+                            return;
+                        }
+                        _ => {}
+                    },
+                    Mode::Command | Mode::Visual => {}
                 }
             }
 
@@ -97,7 +124,7 @@ impl KeymapHandler for VimKeymap {
             match mode {
                 Mode::Normal => editor.handle_normal(key).await,
                 Mode::Insert => editor.handle_insert(key).await,
-                Mode::Command => editor.handle_command(key).await,
+                Mode::Command => editor.handle_command(key, modifiers).await,
                 Mode::Visual => editor.handle_visual(key).await,
                 Mode::Replace => editor.handle_replace(key).await,
             }

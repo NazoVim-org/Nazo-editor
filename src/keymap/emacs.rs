@@ -33,7 +33,7 @@ impl KeymapHandler for EmacsKeymap {
             let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
             let has_alt = modifiers.contains(KeyModifiers::ALT);
 
-            editor.emit_key_event(key);
+            editor.emit_key_event(key, modifiers);
 
             if editor.engine.state.has_confirmation() {
                 editor.handle_confirmation(key).await;
@@ -131,6 +131,7 @@ impl KeymapHandler for EmacsKeymap {
                     let prev_mode = editor.engine.state.mode;
                     editor.engine.state.mode = Mode::Command;
                     editor.engine.state.command_buffer.clear();
+                    editor.engine.state.command_cursor_pos = 0;
                     editor.engine.state.command_buffer.push('/');
                     editor.engine.plugin_manager.emit(PluginEvent::ModeChange {
                         from: prev_mode,
@@ -143,6 +144,7 @@ impl KeymapHandler for EmacsKeymap {
                     let prev_mode = editor.engine.state.mode;
                     editor.engine.state.mode = Mode::Command;
                     editor.engine.state.command_buffer.clear();
+                    editor.engine.state.command_cursor_pos = 0;
                     editor.engine.state.command_buffer.push('?');
                     editor.engine.plugin_manager.emit(PluginEvent::ModeChange {
                         from: prev_mode,

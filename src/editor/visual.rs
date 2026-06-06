@@ -3,9 +3,16 @@ use crate::types::{Mode, VisualType};
 use crossterm::event::KeyCode;
 
 impl Editor {
+    /// Helper: save the current visual selection to last_visual for gv
+    fn save_visual_selection(&mut self) {
+        self.engine.state.last_visual_start = self.engine.state.visual_start;
+        self.engine.state.last_visual_type = self.engine.state.visual_type;
+    }
+
     pub(crate) async fn handle_visual(&mut self, key: KeyCode) {
         match key {
             KeyCode::Esc => {
+                self.save_visual_selection();
                 let prev_mode = self.engine.state.mode;
                 self.engine.state.mode = Mode::Normal;
                 self.engine.state.visual_start = None;
@@ -19,6 +26,7 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('y') => {
+                self.save_visual_selection();
                 self.visual_yank();
                 let prev_mode = self.engine.state.mode;
                 self.engine.state.mode = Mode::Normal;
@@ -33,6 +41,7 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('d') => {
+                self.save_visual_selection();
                 self.visual_delete();
                 let prev_mode = self.engine.state.mode;
                 self.engine.state.mode = Mode::Normal;
@@ -47,6 +56,7 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('c') => {
+                self.save_visual_selection();
                 self.visual_delete();
                 let prev_mode = self.engine.state.mode;
                 self.engine.state.mode = Mode::Insert;
@@ -68,8 +78,7 @@ impl Editor {
                 let line_len = self
                     .engine
                     .buffer
-                    .get_line(self.engine.state.cursor.line)
-                    .len();
+                    .line_char_len(self.engine.state.cursor.line);
                 self.engine.state.cursor.col =
                     (self.engine.state.cursor.col + 1).min(line_len.saturating_sub(1));
                 self.needs_render = true;
@@ -110,15 +119,19 @@ impl Editor {
             }
             KeyCode::Char('$') => {
                 let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
-                let line_len = line.len();
-                self.engine.state.cursor.col = if line_len > 0 && line.ends_with('\n') {
-                    line_len.saturating_sub(2)
+                let line_char_len = self
+                    .engine
+                    .buffer
+                    .line_char_len(self.engine.state.cursor.line);
+                self.engine.state.cursor.col = if line_char_len > 0 && line.ends_with('\n') {
+                    line_char_len.saturating_sub(2)
                 } else {
-                    line_len.saturating_sub(1)
+                    line_char_len.saturating_sub(1)
                 };
                 self.needs_render = true;
             }
             KeyCode::Char('I') if self.engine.state.visual_type == Some(VisualType::Block) => {
+                self.save_visual_selection();
                 let s_col = self
                     .engine
                     .state
@@ -140,6 +153,7 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('A') if self.engine.state.visual_type == Some(VisualType::Block) => {
+                self.save_visual_selection();
                 let e_col = self
                     .engine
                     .state

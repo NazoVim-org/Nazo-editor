@@ -44,6 +44,15 @@ impl TextBuffer {
         self.doc.line(line_number - 1).to_string()
     }
 
+    /// Return the character count (not byte count) of a line.
+    /// Use this instead of `get_line(n).len()` for cursor bounds.
+    pub fn line_char_len(&self, line_number: usize) -> usize {
+        if line_number < 1 || line_number > self.line_count() {
+            return 0;
+        }
+        self.doc.line(line_number - 1).chars().count()
+    }
+
     pub fn insert(&mut self, line: usize, col: usize, text: &str) {
         let line_idx = line.saturating_sub(1);
         if line_idx >= self.doc.len_lines() {
@@ -273,6 +282,35 @@ impl TextBuffer {
         self.get_word_at(line, col)
     }
 
+    /// Get the WORD range at the given position.
+    /// A WORD is a sequence of non-whitespace characters (Vim's `W`/`B`).
+    /// Returns (word_text, start_col, end_col).
+    pub fn get_word_range_upper(&self, line: usize, col: usize) -> (String, usize, usize) {
+        let line_idx = line.saturating_sub(1);
+        if line_idx >= self.doc.len_lines() {
+            return (String::new(), 0, 0);
+        }
+        let line_str = self.doc.line(line_idx).to_string();
+        let chars: Vec<char> = line_str.chars().collect();
+
+        if col >= chars.len() {
+            return (String::new(), col, col);
+        }
+
+        let mut start = col;
+        while start > 0 && !chars[start - 1].is_whitespace() {
+            start -= 1;
+        }
+
+        let mut end = col;
+        while end < chars.len() && !chars[end].is_whitespace() {
+            end += 1;
+        }
+
+        let word: String = chars[start..end].iter().collect();
+        (word, start, end)
+    }
+
     pub fn get_line_range(&self, start_line: usize, end_line: usize) -> String {
         if start_line > end_line || start_line < 1 {
             return String::new();
@@ -404,32 +442,25 @@ impl TextBuffer {
             return Vec::new();
         }
 
-        let query_chars: Vec<char> = query.chars().collect();
+        // Use regex for efficient searching. Escape the query to treat it
+        // as a literal string (not a regex pattern).
+        let escaped = regex::escape(query);
+        let re = match regex::Regex::new(&escaped) {
+            Ok(re) => re,
+            Err(_) => return Vec::new(),
+        };
+
         let mut results = Vec::new();
 
         for line_idx in 0..self.doc.len_lines() {
-            let line = self.doc.line(line_idx);
-            let line_str = line.to_string();
-            let line_chars: Vec<char> = line_str.chars().collect();
-
-            let mut col = 0;
-            while col <= line_chars.len().saturating_sub(query_chars.len()) {
-                let mut matches = true;
-                for (i, &qc) in query_chars.iter().enumerate() {
-                    if col + i >= line_chars.len() || line_chars[col + i] != qc {
-                        matches = false;
-                        break;
-                    }
-                }
-                if matches {
-                    results.push(crate::types::SearchResult {
-                        line: line_idx + 1,
-                        start_col: col,
-                    });
-                    col += 1;
-                } else {
-                    col += 1;
-                }
+            let line_str = self.doc.line(line_idx).to_string();
+            for mat in re.find_iter(&line_str) {
+                // Convert byte offset to char offset for the column.
+                let start_col = line_str[..mat.start()].chars().count();
+                results.push(crate::types::SearchResult {
+                    line: line_idx + 1,
+                    start_col,
+                });
             }
         }
 

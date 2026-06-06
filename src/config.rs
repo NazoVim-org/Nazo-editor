@@ -7,6 +7,8 @@ pub struct Config {
     pub keymap: String,
     /// Show line numbers by default.
     pub show_line_numbers: bool,
+    /// Show relative line numbers by default.
+    pub show_relative_numbers: bool,
     /// Enable soft line wrapping.
     pub wrap: bool,
 }
@@ -16,6 +18,7 @@ impl Default for Config {
         Self {
             keymap: "vim".to_string(),
             show_line_numbers: true,
+            show_relative_numbers: false,
             wrap: true,
         }
     }
@@ -68,6 +71,16 @@ impl Config {
                 Some(b) => out.show_line_numbers = b,
                 None => eprintln!(
                     "[config] Ignoring 'show_line_numbers' in {}: not a bool",
+                    path.display()
+                ),
+            }
+        }
+
+        if let Some(v) = table.get("show_relative_numbers") {
+            match v.as_bool() {
+                Some(b) => out.show_relative_numbers = b,
+                None => eprintln!(
+                    "[config] Ignoring 'show_relative_numbers' in {}: not a bool",
                     path.display()
                 ),
             }
