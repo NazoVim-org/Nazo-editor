@@ -162,7 +162,7 @@ impl Editor {
                 self.engine.buffer.insert_char(line, col - 1, c2);
                 self.engine.buffer.insert_char(line, col, c1);
                 self.engine.state.cursor.col =
-                    (col + 1).min(self.engine.buffer.get_line(line).len().saturating_sub(1));
+                    (col + 1).min(self.engine.buffer.line_char_len(line).saturating_sub(1));
                 self.on_buffer_modified();
             }
         }
@@ -185,6 +185,7 @@ impl Editor {
 
     pub fn abort(&mut self) {
         self.engine.state.command_buffer.clear();
+        self.engine.state.command_cursor_pos = 0;
         if self.engine.state.mode == crate::types::Mode::Command {
             self.engine.state.mode = crate::types::Mode::Normal;
             self.needs_render = true;
@@ -217,14 +218,18 @@ impl Editor {
 
     pub(crate) fn kill_line(&mut self) {
         let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
-        let line_len = line.len();
-        let end_col = if line_len > 0 && line.ends_with('\n') {
-            line_len - 1
+        let line_char_len = line.chars().count();
+        let end_col = if line_char_len > 0 && line.ends_with('\n') {
+            line_char_len - 1
         } else {
-            line_len
+            line_char_len
         };
         if self.engine.state.cursor.col < end_col {
-            let deleted = line[self.engine.state.cursor.col..end_col].to_string();
+            let deleted: String = line
+                .chars()
+                .skip(self.engine.state.cursor.col)
+                .take(end_col - self.engine.state.cursor.col)
+                .collect();
             self.engine.kill_ring.push(&deleted);
             let mod_count = self.engine.buffer.modification_count();
             self.engine.buffer.delete_range(
@@ -270,7 +275,7 @@ impl Editor {
                 .engine
                 .buffer
                 .get_line(self.engine.state.cursor.line - 1);
-            let prev_len = merged.len();
+            let prev_len = merged.chars().count();
             self.engine
                 .buffer
                 .merge_with_prev_line(self.engine.state.cursor.line);
@@ -300,9 +305,13 @@ impl Editor {
 
     pub(crate) fn delete_char_forward(&mut self) {
         let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
-        if self.engine.state.cursor.col < line.len() {
-            let deleted_char =
-                line[self.engine.state.cursor.col..self.engine.state.cursor.col + 1].to_string();
+        let line_char_len = line.chars().count();
+        if self.engine.state.cursor.col < line_char_len {
+            let deleted_char = line
+                .chars()
+                .nth(self.engine.state.cursor.col)
+                .unwrap_or_default()
+                .to_string();
             let mod_count = self.engine.buffer.modification_count();
             self.engine
                 .buffer

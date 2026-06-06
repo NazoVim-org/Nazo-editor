@@ -1,5 +1,5 @@
 use crate::editor::Editor;
-use crate::types::{DotAction, Mode};
+use crate::types::{DotAction, Mode, Position};
 use crate::undo::{Edit, EditType};
 use crossterm::event::KeyCode;
 
@@ -159,7 +159,7 @@ impl Editor {
         let mut old_text = String::new();
         for _ in 0..count {
             let line_str = self.engine.buffer.get_line(line);
-            if col < line_str.len() {
+            if col < line_str.chars().count() {
                 old_text.push(line_str[col..].chars().next().unwrap());
                 col += 1;
             }
@@ -202,6 +202,17 @@ impl Editor {
     pub(crate) async fn handle_replace(&mut self, key: KeyCode) {
         match key {
             KeyCode::Esc => {
+                // Flush accumulated Replace mode edits as a single undo group.
+                if !self.engine.replace_undo_group.is_empty() {
+                    let edits = std::mem::take(&mut self.engine.replace_undo_group);
+                    let mod_count = self.engine.buffer.modification_count();
+                    self.engine.undo_manager.push(Edit {
+                        edit_type: EditType::Group { edits },
+                        cursor_before: self.engine.state.cursor,
+                        cursor_after: self.engine.state.cursor,
+                        modification_count: mod_count,
+                    });
+                }
                 self.engine.operator_state.replace_char = None;
                 self.transition_mode(Mode::Normal);
                 self.needs_render = true;
@@ -215,11 +226,30 @@ impl Editor {
                 // ── Multi-char Replace mode (R) ───────────────────
                 let line = self.engine.state.cursor.line;
                 let col = self.engine.state.cursor.col;
-                if col < self.engine.buffer.get_line(line).len() {
+                let old_char = if col < self.engine.buffer.line_char_len(line) {
+                    let line_str = self.engine.buffer.get_line(line);
+                    line_str.chars().nth(col).unwrap_or('\0')
+                } else {
+                    '\0'
+                };
+                if old_char != '\0' {
                     self.engine.buffer.delete(line, col);
                 }
                 self.engine.buffer.insert_char(line, col, c);
                 self.engine.state.cursor.col += 1;
+                // Record the replace for undo grouping.
+                let mod_count = self.engine.buffer.modification_count();
+                self.engine.replace_undo_group.push(Edit {
+                    edit_type: EditType::Replace {
+                        line,
+                        col,
+                        old_text: old_char.to_string(),
+                        new_text: c.to_string(),
+                    },
+                    cursor_before: Position { line, col },
+                    cursor_after: self.engine.state.cursor,
+                    modification_count: mod_count,
+                });
                 self.on_buffer_modified();
             }
             KeyCode::Backspace => {
@@ -233,13 +263,18 @@ impl Editor {
                 if self.engine.operator_state.replace_char == Some('\0') {
                     return self.handle_replace_inline_char('\n');
                 }
-                self.engine.buffer.insert(
-                    self.engine.state.cursor.line,
-                    self.engine.state.cursor.col,
-                    "\n",
-                );
+                let line = self.engine.state.cursor.line;
+                let col = self.engine.state.cursor.col;
+                let mod_count = self.engine.buffer.modification_count();
+                self.engine.buffer.insert(line, col, "\n");
                 self.engine.state.cursor.line += 1;
                 self.engine.state.cursor.col = 0;
+                self.engine.replace_undo_group.push(Edit {
+                    edit_type: EditType::Split { line, col },
+                    cursor_before: Position { line, col },
+                    cursor_after: self.engine.state.cursor,
+                    modification_count: mod_count,
+                });
                 self.on_buffer_modified();
             }
             _ => {}

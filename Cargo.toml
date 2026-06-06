@@ -40,6 +40,7 @@ ropey = "1.6"
 tokio = { version = "1", features = ["rt", "macros", "fs"] }
 thiserror = "2"
 toml = "0.8"
+regex = "1"
 
 # Optional, feature-gated.
 syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy", "default-syntaxes", "default-themes"], optional = true }
@@ -48,6 +49,13 @@ rust_lisp = { version = "0.18", optional = true }
 quickjs-rusty = { version = "0.11", optional = true }
 libloading = { version = "0.8", optional = true }
 serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "editor_bench"
+harness = false
 
 [profile.release]
 lto = true

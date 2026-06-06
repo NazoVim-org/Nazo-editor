@@ -1,5 +1,5 @@
 use crate::editor::Editor;
-use crate::types::Mode;
+use crate::types::{MessageLevel, Mode};
 use crossterm::event::{KeyCode, KeyModifiers};
 
 impl Editor {
@@ -22,6 +22,13 @@ impl Editor {
     pub(crate) async fn play_macro(&mut self, name: char) {
         let keys = self.engine.state.macros.get(name).cloned();
         if let Some(keys) = keys {
+            if !self.engine.state.macros.enter_playback() {
+                self.engine
+                    .state
+                    .push_message(MessageLevel::Warning, "Macro recursion limit exceeded (20)".to_string());
+                self.needs_render = true;
+                return;
+            }
             self.needs_render = true;
             for key_str in &keys {
                 let Some((key, modifiers)) = Self::decode_key(key_str) else {
@@ -43,12 +50,13 @@ impl Editor {
                     match self.engine.state.mode {
                         Mode::Normal => Box::pin(self.handle_normal(key)),
                         Mode::Insert => Box::pin(self.handle_insert(key)),
-                        Mode::Command => Box::pin(self.handle_command(key)),
+                        Mode::Command => Box::pin(self.handle_command(key, crossterm::event::KeyModifiers::empty())),
                         Mode::Visual => Box::pin(self.handle_visual(key)),
                         Mode::Replace => Box::pin(self.handle_replace(key)),
                     };
                 fut.await;
             }
+            self.engine.state.macros.exit_playback();
         }
     }
 

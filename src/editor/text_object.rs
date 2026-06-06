@@ -10,44 +10,57 @@ impl Editor {
         let mod_count = self.engine.buffer.modification_count();
 
         if indent {
-            self.engine.buffer.insert(line, 0, "\t");
+            let indent_str = if self.engine.state.expandtab {
+                " ".repeat(self.engine.state.shiftwidth)
+            } else {
+                "\t".to_string()
+            };
+            self.engine.buffer.insert(line, 0, &indent_str);
             self.engine.undo_manager.push(Edit {
                 edit_type: EditType::Insert {
                     line,
                     col: 0,
-                    text: "\t".to_string(),
+                    text: indent_str,
                 },
                 cursor_before: self.engine.state.cursor,
                 cursor_after: self.engine.state.cursor,
                 modification_count: mod_count,
             });
-        } else if content.starts_with('\t') {
-            self.engine.buffer.delete(line, 0);
-            self.engine.undo_manager.push(Edit {
-                edit_type: EditType::Delete {
-                    line,
-                    col: 0,
-                    text: "\t".to_string(),
-                },
-                cursor_before: self.engine.state.cursor,
-                cursor_after: self.engine.state.cursor,
-                modification_count: mod_count,
-            });
-        } else if content.starts_with("  ") {
-            self.engine.buffer.delete(line, 0);
-            self.engine.buffer.delete(line, 0);
-            self.engine.undo_manager.push(Edit {
-                edit_type: EditType::Delete {
-                    line,
-                    col: 0,
-                    text: "  ".to_string(),
-                },
-                cursor_before: self.engine.state.cursor,
-                cursor_after: self.engine.state.cursor,
-                modification_count: mod_count,
-            });
+        } else {
+            // Unindent: try to remove `shiftwidth` spaces or one tab.
+            let sw = self.engine.state.shiftwidth;
+            if content.starts_with('\t') {
+                self.engine.buffer.delete(line, 0);
+                self.engine.undo_manager.push(Edit {
+                    edit_type: EditType::Delete {
+                        line,
+                        col: 0,
+                        text: "\t".to_string(),
+                    },
+                    cursor_before: self.engine.state.cursor,
+                    cursor_after: self.engine.state.cursor,
+                    modification_count: mod_count,
+                });
+            } else if content.starts_with(&" ".repeat(sw)) {
+                for _ in 0..sw {
+                    self.engine.buffer.delete(line, 0);
+                }
+                self.engine.undo_manager.push(Edit {
+                    edit_type: EditType::Delete {
+                        line,
+                        col: 0,
+                        text: " ".repeat(sw),
+                    },
+                    cursor_before: self.engine.state.cursor,
+                    cursor_after: self.engine.state.cursor,
+                    modification_count: mod_count,
+                });
+            }
         }
 
+        self.engine.dot_last_action = Some(crate::types::DotAction::Indent {
+            unindent: !indent,
+        });
         self.needs_render = true;
     }
 
@@ -64,11 +77,12 @@ impl Editor {
                     .buffer
                     .get_word_range(self.engine.state.cursor.line, self.engine.state.cursor.col);
                 if !word.is_empty() {
+                    let word_chars = word.chars().count();
                     let content = self.engine.buffer.get_char_range(
                         self.engine.state.cursor.line,
                         start,
                         self.engine.state.cursor.line,
-                        start + word.len(),
+                        start + word_chars,
                     );
                     self.engine.register.set(register, &content);
                     let char_start = self
@@ -76,9 +90,41 @@ impl Editor {
                         .buffer
                         .line_to_char(self.engine.state.cursor.line - 1)
                         + start;
-                    let char_end = char_start + word.len();
+                    let char_end = char_start + word_chars;
                     self.engine.buffer.remove_range(char_start, char_end);
                 }
+            }
+            let prev_mode = self.engine.state.mode;
+            self.engine.state.mode = crate::types::Mode::Insert;
+            self.engine
+                .plugin_manager
+                .emit(crate::types::PluginEvent::ModeChange {
+                    from: prev_mode,
+                    to: crate::types::Mode::Insert,
+                });
+            self.on_buffer_modified();
+        } else if let KeyCode::Char('W') = key {
+            // `cW` — change WORD
+            let (word, start, _end) = self
+                .engine
+                .buffer
+                .get_word_range_upper(self.engine.state.cursor.line, self.engine.state.cursor.col);
+            if !word.is_empty() {
+                let word_chars = word.chars().count();
+                let content = self.engine.buffer.get_char_range(
+                    self.engine.state.cursor.line,
+                    start,
+                    self.engine.state.cursor.line,
+                    start + word_chars,
+                );
+                self.engine.register.set(register, &content);
+                let char_start = self
+                    .engine
+                    .buffer
+                    .line_to_char(self.engine.state.cursor.line - 1)
+                    + start;
+                let char_end = char_start + word_chars;
+                self.engine.buffer.remove_range(char_start, char_end);
             }
             let prev_mode = self.engine.state.mode;
             self.engine.state.mode = crate::types::Mode::Insert;
@@ -102,17 +148,18 @@ impl Editor {
                         self.engine.state.cursor.col,
                     );
                     if !word.is_empty() {
+                        let word_chars = word.chars().count();
                         let char_start = self
                             .engine
                             .buffer
                             .line_to_char(self.engine.state.cursor.line - 1)
                             + start;
-                        let char_end = char_start + word.len();
+                        let char_end = char_start + word_chars;
                         let content = self.engine.buffer.get_char_range(
                             self.engine.state.cursor.line,
                             start,
                             self.engine.state.cursor.line,
-                            start + word.len(),
+                            start + word_chars,
                         );
                         let mod_count = self.engine.buffer.modification_count();
                         self.engine.register.set(register, &content);
@@ -197,9 +244,65 @@ impl Editor {
             KeyCode::Char('<') | KeyCode::Char('>') => {
                 self.handle_bracket_text_object(register, '<', '>', inner);
             }
+            KeyCode::Char('W') => {
+                self.handle_word_text_object(register, inner);
+            }
             _ => {}
         }
         self.needs_render = true;
+    }
+
+    /// Handle `iW` (inner WORD) and `aW` (a WORD) text objects.
+    /// WORDs are whitespace-delimited sequences (Vim's `W`/`B`).
+    fn handle_word_text_object(&mut self, register: char, inner: bool) {
+        let (word, start, end) = self.engine.buffer.get_word_range_upper(
+            self.engine.state.cursor.line,
+            self.engine.state.cursor.col,
+        );
+        if word.is_empty() {
+            return;
+        }
+
+        let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
+        let line_chars: Vec<char> = line.chars().collect();
+
+        let (content_start, content_end) = if inner {
+            (start, end)
+        } else {
+            // `aW` includes surrounding whitespace.
+            let mut aw_start = start;
+            while aw_start > 0 && line_chars[aw_start - 1].is_whitespace() {
+                aw_start -= 1;
+            }
+            let mut aw_end = end;
+            while aw_end < line_chars.len() && line_chars[aw_end].is_whitespace() {
+                aw_end += 1;
+            }
+            (aw_start, aw_end)
+        };
+
+        let content_chars = content_end - content_start;
+        let content: String = line_chars[content_start..content_end].iter().collect();
+        let char_start = self
+            .engine
+            .buffer
+            .line_to_char(self.engine.state.cursor.line - 1)
+            + content_start;
+        let char_end = char_start + content_chars;
+        let mod_count = self.engine.buffer.modification_count();
+
+        self.engine.register.set(register, &content);
+        self.engine.buffer.remove_range(char_start, char_end);
+        self.engine.undo_manager.push(Edit {
+            edit_type: EditType::Delete {
+                line: self.engine.state.cursor.line,
+                col: content_start,
+                text: content,
+            },
+            cursor_before: self.engine.state.cursor,
+            cursor_after: self.engine.state.cursor,
+            modification_count: mod_count,
+        });
     }
 
     fn handle_quote_text_object(&mut self, register: char, quote: char, inner: bool) {
@@ -237,7 +340,7 @@ impl Editor {
                     .buffer
                     .line_to_char(self.engine.state.cursor.line - 1)
                     + content_start;
-                let char_end = char_start + content.len();
+                let char_end = char_start + content.chars().count();
                 let mod_count = self.engine.buffer.modification_count();
 
                 self.engine.register.set(register, &content);

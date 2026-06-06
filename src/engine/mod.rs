@@ -3,9 +3,10 @@ use crate::highlight::Style;
 use crate::plugin::PluginManager;
 use crate::register::Register;
 use crate::state::{CursorState, InsertState, OperatorState, SearchState};
-use crate::types::{ConfirmAction, DotAction, EditorState, KillRing, Mode};
+use crate::types::{ConfirmAction, DotAction, EditorState, KillRing, Mode, Position};
 use crate::undo::UndoManager;
 use crossterm::event::{KeyCode, KeyModifiers};
+use std::path::PathBuf;
 use std::time::Instant;
 
 /// Signals from Engine to the UI layer after an operation.
@@ -57,6 +58,12 @@ pub struct Engine {
     pub plugin_manager: PluginManager,
     pub kill_ring: KillRing,
     pub(crate) dot_last_action: Option<DotAction>,
+    /// Edits accumulated during Replace mode, flushed as a single undo group on Esc.
+    pub(crate) replace_undo_group: Vec<crate::undo::Edit>,
+    /// Inactive buffers: (TextBuffer, UndoManager, file_path, cursor_position).
+    pub inactive_buffers: Vec<(TextBuffer, UndoManager, Option<PathBuf>, Position)>,
+    /// Window layout for split views.
+    pub window_layout: crate::types::WindowLayout,
     #[cfg(feature = "syntax")]
     pub(crate) highlighter: crate::highlight::Highlighter,
     #[cfg(feature = "syntax")]
@@ -79,6 +86,9 @@ impl Engine {
             plugin_manager,
             kill_ring: KillRing::new(),
             dot_last_action: None,
+            replace_undo_group: Vec::new(),
+            inactive_buffers: Vec::new(),
+            window_layout: crate::types::WindowLayout::new_single(24, 80), // Default, updated by Editor
             #[cfg(feature = "syntax")]
             highlighter: crate::highlight::Highlighter::new(),
             #[cfg(feature = "syntax")]
@@ -227,9 +237,269 @@ impl Engine {
         self.state.visual_start = None;
         self.state.visual_type = None;
         self.state.command_buffer.clear();
+        self.state.command_cursor_pos = 0;
     }
 
     pub fn take_count(&mut self) -> usize {
         self.operator_state.take_count()
+    }
+
+    // ── Multi-buffer support ──────────────────────────────────────
+
+    /// Switch to the next buffer (`:bn`).
+    pub fn buffer_next(&mut self) -> Result<(), String> {
+        if self.inactive_buffers.is_empty() {
+            return Err("No other buffer".to_string());
+        }
+        // Save current buffer.
+        let current = (
+            std::mem::replace(&mut self.buffer, TextBuffer::new()),
+            std::mem::replace(&mut self.undo_manager, UndoManager::new()),
+            self.state.file_path.take(),
+            self.state.cursor,
+        );
+        self.inactive_buffers.push(current);
+        // Swap in the next buffer (rotate left).
+        let first = self.inactive_buffers.remove(0);
+        self.buffer = first.0;
+        self.undo_manager = first.1;
+        self.state.file_path = first.2;
+        self.state.cursor = first.3;
+        self.state.dirty = self.buffer.is_dirty();
+        Ok(())
+    }
+
+    /// Switch to the previous buffer (`:bp`).
+    pub fn buffer_prev(&mut self) -> Result<(), String> {
+        if self.inactive_buffers.is_empty() {
+            return Err("No other buffer".to_string());
+        }
+        // Save current buffer.
+        let current = (
+            std::mem::replace(&mut self.buffer, TextBuffer::new()),
+            std::mem::replace(&mut self.undo_manager, UndoManager::new()),
+            self.state.file_path.take(),
+            self.state.cursor,
+        );
+        self.inactive_buffers.insert(0, current);
+        // Swap in the last buffer.
+        let last = self.inactive_buffers.pop().unwrap();
+        self.buffer = last.0;
+        self.undo_manager = last.1;
+        self.state.file_path = last.2;
+        self.state.cursor = last.3;
+        self.state.dirty = self.buffer.is_dirty();
+        Ok(())
+    }
+
+    /// Delete the current buffer and switch to the next (`:bdelete`).
+    pub fn buffer_delete(&mut self) -> Result<(), String> {
+        if self.inactive_buffers.is_empty() {
+            // No other buffer to switch to — just clear the current one.
+            self.buffer = TextBuffer::new();
+            self.undo_manager = UndoManager::new();
+            self.state.file_path = None;
+            self.state.cursor = Position { line: 1, col: 0 };
+            self.state.dirty = false;
+            return Ok(());
+        }
+        // Discard current buffer, swap in next.
+        let first = self.inactive_buffers.remove(0);
+        self.buffer = first.0;
+        self.undo_manager = first.1;
+        self.state.file_path = first.2;
+        self.state.cursor = first.3;
+        self.state.dirty = self.buffer.is_dirty();
+        Ok(())
+    }
+
+    /// Open a file in a new buffer (`:e {path}` without switching).
+    pub fn buffer_open(&mut self, path: &str) -> Result<(), String> {
+        use std::path::Path;
+        let p = Path::new(path).to_path_buf();
+        let content = std::fs::read_to_string(&p)
+            .map_err(|e| format!("Cannot read '{}': {}", path, e))?;
+        let mut new_buffer = TextBuffer::new();
+        new_buffer.set_file_path(Some(p.clone()));
+        new_buffer.insert(1, 0, &content);
+
+        // Switch current buffer to inactive, open new one as active.
+        let current = (
+            std::mem::replace(&mut self.buffer, new_buffer),
+            std::mem::replace(&mut self.undo_manager, UndoManager::new()),
+            self.state.file_path.take(),
+            self.state.cursor,
+        );
+        self.inactive_buffers.push(current);
+        self.state.file_path = Some(p);
+        self.state.cursor = Position { line: 1, col: 0 };
+        self.state.dirty = false;
+        Ok(())
+    }
+
+    /// List all buffers (`:ls`). Returns a description string.
+    pub fn buffer_list(&self) -> String {
+        let mut lines = Vec::new();
+        // Current buffer.
+        let current_name = self
+            .state
+            .file_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "[No Name]".to_string());
+        let current_dirty = if self.buffer.is_dirty() { " +" } else { "" };
+        lines.push(format!("  * {}{}", current_name, current_dirty));
+        // Inactive buffers.
+        for (i, (_, _, path, _)) in self.inactive_buffers.iter().enumerate() {
+            let name = path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "[No Name]".to_string());
+            // Check if dirty by checking modification count.
+            let dirty_marker = "";
+            lines.push(format!("  {} {}{}", i + 1, name, dirty_marker));
+        }
+        lines.join("\n")
+    }
+
+    // ── Window management ──────────────────────────────────────────
+
+    /// Switch focus to the window at the given index.
+    /// Swaps the active buffer with the target window's buffer.
+    pub fn focus_window(&mut self, idx: usize) -> Result<(), String> {
+        if idx >= self.window_layout.windows.len() {
+            return Err("Invalid window index".to_string());
+        }
+        if idx == self.window_layout.focused {
+            return Ok(());
+        }
+
+        let target_buf_idx = self.window_layout.windows[idx].buf_idx;
+        let current_focused = self.window_layout.focused;
+
+        // Save current window's state
+        self.window_layout.windows[current_focused].cursor = self.state.cursor;
+        self.window_layout.windows[current_focused].scroll_top = self.state.cursor.line; // Approximate
+
+        // If target is an inactive buffer, swap buffers
+        if target_buf_idx == 0 {
+            // Target is the active buffer (already current), just update focus
+        } else if target_buf_idx > 0 && target_buf_idx - 1 < self.inactive_buffers.len() {
+            // Swap active buffer with target inactive buffer
+            let target_idx = target_buf_idx - 1;
+            let current = (
+                std::mem::replace(&mut self.buffer, TextBuffer::new()),
+                std::mem::replace(&mut self.undo_manager, UndoManager::new()),
+                self.state.file_path.take(),
+                self.state.cursor,
+            );
+            // Update the inactive buffer we're leaving
+            self.inactive_buffers[current_focused] = current;
+            // Swap in the target buffer
+            let target = self.inactive_buffers.remove(target_idx);
+            self.buffer = target.0;
+            self.undo_manager = target.1;
+            self.state.file_path = target.2;
+            self.state.cursor = target.3;
+            self.state.dirty = self.buffer.is_dirty();
+        }
+
+        // Update window layout
+        self.window_layout.windows[idx].buf_idx = 0;
+        if current_focused < self.window_layout.windows.len() {
+            self.window_layout.windows[current_focused].buf_idx = idx + 1; // Move old active to inactive slot
+        }
+        self.window_layout.focused = idx;
+
+        // Restore window state
+        self.state.cursor = self.window_layout.windows[idx].cursor;
+        self.state.dirty = self.buffer.is_dirty();
+
+        Ok(())
+    }
+
+    /// Focus the next window (Ctrl-w w).
+    pub fn focus_next_window(&mut self) -> Result<(), String> {
+        let next = (self.window_layout.focused + 1) % self.window_layout.windows.len();
+        self.focus_window(next)
+    }
+
+    /// Focus window in direction.
+    pub fn focus_window_direction(&mut self, direction: crate::types::Direction) {
+        self.window_layout.focus_direction(direction);
+    }
+
+    /// Split current window horizontally (:split).
+    pub fn split_horizontal(&mut self) -> Result<(), String> {
+        // Save current window state
+        let focused = self.window_layout.focused;
+        self.window_layout.windows[focused].cursor = self.state.cursor;
+        self.window_layout.windows[focused].scroll_top = self.state.cursor.line;
+
+        // Split the window
+        self.window_layout.split_horizontal();
+
+        // New window gets same buffer (buf_idx = 0 for both)
+        let new_focused = self.window_layout.focused;
+        self.window_layout.windows[new_focused].buf_idx = 0;
+        self.window_layout.windows[new_focused].cursor = self.state.cursor;
+        self.window_layout.windows[new_focused].scroll_top = self.state.cursor.line;
+
+        Ok(())
+    }
+
+    /// Split current window vertically (:vsplit).
+    pub fn split_vertical(&mut self) -> Result<(), String> {
+        // Save current window state
+        let focused = self.window_layout.focused;
+        self.window_layout.windows[focused].cursor = self.state.cursor;
+        self.window_layout.windows[focused].scroll_top = self.state.cursor.line;
+
+        // Split the window
+        self.window_layout.split_vertical();
+
+        // New window gets same buffer
+        let new_focused = self.window_layout.focused;
+        self.window_layout.windows[new_focused].buf_idx = 0;
+        self.window_layout.windows[new_focused].cursor = self.state.cursor;
+        self.window_layout.windows[new_focused].scroll_top = self.state.cursor.line;
+
+        Ok(())
+    }
+
+    /// Close focused window (Ctrl-w c).
+    pub fn close_focused_window(&mut self) -> Result<(), String> {
+        if self.window_layout.windows.len() <= 1 {
+            return Err("Cannot close last window".to_string());
+        }
+        let focused = self.window_layout.focused;
+        self.window_layout.close_focused();
+        // If we closed the focused window, focus shifts to next
+        if self.window_layout.focused != focused {
+            self.focus_window(self.window_layout.focused)?;
+        }
+        Ok(())
+    }
+
+    /// Equalize all window sizes (Ctrl-w =).
+    pub fn equalize_windows(&mut self, rows: usize, cols: usize) {
+        self.window_layout.equalize(rows, cols);
+    }
+
+    /// Maximize focused window vertically (Ctrl-w _).
+    pub fn maximize_vertical(&mut self, rows: usize, cols: usize) {
+        self.window_layout.maximize_vertical(rows, cols);
+    }
+
+    /// Maximize focused window horizontally (Ctrl-w |).
+    pub fn maximize_horizontal(&mut self, rows: usize, cols: usize) {
+        self.window_layout.maximize_horizontal(rows, cols);
+    }
+
+    /// Update window layout dimensions on terminal resize.
+    pub fn update_window_layout(&mut self, rows: usize, cols: usize) {
+        self.window_layout = crate::types::WindowLayout::new_single(rows, cols);
     }
 }

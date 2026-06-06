@@ -96,8 +96,7 @@ impl Editor {
         let line_len = self
             .engine
             .buffer
-            .get_line(self.engine.state.cursor.line)
-            .len();
+            .line_char_len(self.engine.state.cursor.line);
         self.engine.state.cursor.col =
             (self.engine.state.cursor.col + n).min(line_len.saturating_sub(1));
         self.needs_render = true;
@@ -114,8 +113,7 @@ impl Editor {
         let len = self
             .engine
             .buffer
-            .get_line(self.engine.state.cursor.line)
-            .len();
+            .line_char_len(self.engine.state.cursor.line);
         self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
         self.needs_render = true;
     }
@@ -125,8 +123,7 @@ impl Editor {
         let len = self
             .engine
             .buffer
-            .get_line(self.engine.state.cursor.line)
-            .len();
+            .line_char_len(self.engine.state.cursor.line);
         self.engine.state.cursor.col = self.engine.state.cursor.col.min(len.saturating_sub(1));
         self.needs_render = true;
     }
@@ -137,8 +134,11 @@ impl Editor {
     }
 
     pub(crate) fn cursor_line_end(&mut self) {
-        let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
-        self.engine.state.cursor.col = line.len().saturating_sub(1);
+        let line_len = self
+            .engine
+            .buffer
+            .line_char_len(self.engine.state.cursor.line);
+        self.engine.state.cursor.col = line_len.saturating_sub(1);
         self.needs_render = true;
     }
 
@@ -203,11 +203,14 @@ impl Editor {
     }
 
     pub(crate) fn find_char(&mut self, ch: char, till: bool, forward: bool) -> bool {
-        let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
-        let chars: Vec<char> = line.chars().collect();
+        let current_line = self.engine.state.cursor.line;
         let start_col = self.engine.state.cursor.col;
+        let total_lines = self.engine.buffer.line_count();
 
         if forward {
+            // Search from start_col+1 on the current line, then subsequent lines.
+            let line = self.engine.buffer.get_line(current_line);
+            let chars: Vec<char> = line.chars().collect();
             for (i, &c) in chars.iter().enumerate().skip(start_col + 1) {
                 if c == ch {
                     if till {
@@ -218,7 +221,34 @@ impl Editor {
                     return true;
                 }
             }
+            // Not found on current line — search subsequent lines.
+            for line_idx in (current_line + 1)..=total_lines {
+                let line = self.engine.buffer.get_line(line_idx);
+                let chars: Vec<char> = line.chars().collect();
+                for (i, &c) in chars.iter().enumerate() {
+                    if c == ch {
+                        self.engine.state.cursor.line = line_idx;
+                        if till {
+                            // `t` forward to next line: place cursor at end of previous line.
+                            if line_idx > 1 {
+                                let prev_line = self.engine.buffer.get_line(line_idx - 1);
+                                let prev_chars: Vec<char> = prev_line.chars().collect();
+                                self.engine.state.cursor.col =
+                                    prev_chars.len().saturating_sub(1).max(0);
+                            } else {
+                                self.engine.state.cursor.col = 0;
+                            }
+                        } else {
+                            self.engine.state.cursor.col = i;
+                        }
+                        return true;
+                    }
+                }
+            }
         } else {
+            // Search from start_col-1 on the current line, then preceding lines.
+            let line = self.engine.buffer.get_line(current_line);
+            let chars: Vec<char> = line.chars().collect();
             for i in (0..start_col).rev() {
                 if chars[i] == ch {
                     if till {
@@ -227,6 +257,23 @@ impl Editor {
                         self.engine.state.cursor.col = i;
                     }
                     return true;
+                }
+            }
+            // Not found on current line — search preceding lines.
+            if current_line > 1 {
+                for line_idx in (1..current_line).rev() {
+                    let line = self.engine.buffer.get_line(line_idx);
+                    let chars: Vec<char> = line.chars().collect();
+                    if let Some(pos) = chars.iter().rposition(|&c| c == ch) {
+                        self.engine.state.cursor.line = line_idx;
+                        if till {
+                            // `T` backward to preceding line: place cursor at start of next line.
+                            self.engine.state.cursor.col = 0;
+                        } else {
+                            self.engine.state.cursor.col = pos;
+                        }
+                        return true;
+                    }
                 }
             }
         }
@@ -276,7 +323,7 @@ impl Editor {
         loop {
             if direction > 0 {
                 current_col += 1;
-                if current_col >= self.engine.buffer.get_line(current_line).len() {
+                if current_col >= self.engine.buffer.line_char_len(current_line) {
                     current_line += 1;
                     if current_line > self.engine.buffer.line_count() {
                         break;
@@ -292,8 +339,7 @@ impl Editor {
                     current_col = self
                         .engine
                         .buffer
-                        .get_line(current_line)
-                        .len()
+                        .line_char_len(current_line)
                         .saturating_sub(1);
                 } else {
                     current_col -= 1;

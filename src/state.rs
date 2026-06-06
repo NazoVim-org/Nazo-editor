@@ -32,6 +32,8 @@ pub struct OperatorState {
     pub macro_play: Option<char>,
     /// Character to replace with in Replace mode; None means normal Replace.
     pub replace_char: Option<char>,
+    /// Ctrl-w prefix: waiting for second key (w, j, k, h, l, c, =, _, |, etc.)
+    pub ctrl_w_prefix: bool,
 }
 
 impl OperatorState {
@@ -43,6 +45,7 @@ impl OperatorState {
         self.mark = None;
         self.macro_play = None;
         self.replace_char = None;
+        self.ctrl_w_prefix = false;
     }
 
     /// Take the accumulated count, defaulting to 1 if absent.

@@ -1,9 +1,9 @@
 use crate::editor::Editor;
-use crate::types::{ConfirmAction, Mode, SearchDirection};
-use crossterm::event::KeyCode;
+use crate::types::{ConfirmAction, MessageLevel, Mode, SearchDirection};
+use crossterm::event::{KeyCode, KeyModifiers};
 
 impl Editor {
-    pub(crate) async fn handle_command(&mut self, key: KeyCode) {
+    pub(crate) async fn handle_command(&mut self, key: KeyCode, modifiers: KeyModifiers) {
         if self.engine.state.has_confirmation() {
             self.handle_confirmation(key).await;
             return;
@@ -14,6 +14,7 @@ impl Editor {
                 let cmd = self.engine.state.command_buffer.trim().to_string();
                 let cmd = cmd.strip_prefix(':').unwrap_or(&cmd);
                 self.engine.state.command_buffer.clear();
+                self.engine.state.command_cursor_pos = 0;
 
                 match cmd {
                     "q" => {
@@ -42,6 +43,63 @@ impl Editor {
                         let keymap_name = cmd.trim_start_matches("keymap ").trim();
                         self.switch_keymap(keymap_name);
                     }
+                    "bn" | "bnext" => {
+                        if let Err(e) = self.engine.buffer_next() {
+                            self.engine.state.push_message(MessageLevel::Error, e);
+                        }
+                        self.needs_render = true;
+                    }
+                    "bp" | "bprevious" | "bprev" => {
+                        if let Err(e) = self.engine.buffer_prev() {
+                            self.engine.state.push_message(MessageLevel::Error, e);
+                        }
+                        self.needs_render = true;
+                    }
+                    "bd" | "bdelete" => {
+                        if let Err(e) = self.engine.buffer_delete() {
+                            self.engine.state.push_message(MessageLevel::Error, e);
+                        }
+                        self.needs_render = true;
+                    }
+                    "ls" | "buffers" => {
+                        let list = self.engine.buffer_list();
+                        self.engine.state.push_message(MessageLevel::Info, list);
+                    }
+                    "sp" | "split" => {
+                        if let Err(e) = self.engine.split_horizontal() {
+                            self.engine.state.push_message(MessageLevel::Error, e);
+                        }
+                        self.needs_render = true;
+                    }
+                    "vs" | "vsplit" => {
+                        if let Err(e) = self.engine.split_vertical() {
+                            self.engine.state.push_message(MessageLevel::Error, e);
+                        }
+                        self.needs_render = true;
+                    }
+                    "messages" => {
+                        let history: Vec<_> = self.engine.state.message_history.iter().cloned().collect();
+                        if history.is_empty() {
+                            self.engine.state.push_message(MessageLevel::Info, "No messages".to_string());
+                        } else {
+                            // Display all messages in history
+                            for msg in history {
+                                let prefix = match msg.level {
+                                    MessageLevel::Error => "[ERROR]",
+                                    MessageLevel::Warning => "[WARN]",
+                                    MessageLevel::Info => "[INFO]",
+                                };
+                                self.engine.state.push_message(msg.level, format!("{} {}", prefix, msg.text));
+                            }
+                        }
+                    }
+                    cmd if cmd.starts_with("e ") => {
+                        let path = cmd.trim_start_matches("e ").trim();
+                        if let Err(e) = self.engine.buffer_open(path) {
+                            self.engine.state.push_message(MessageLevel::Error, e);
+                        }
+                        self.needs_render = true;
+                    }
                     _ => {
                         if let Some(query) = cmd.strip_prefix('/') {
                             let direction = SearchDirection::Forward;
@@ -57,6 +115,8 @@ impl Editor {
                             self.handle_write_path(cmd).await;
                         } else if cmd.starts_with("wq ") || cmd.starts_with("wq! ") {
                             self.handle_write_quit_path(cmd).await;
+                        } else if cmd.starts_with("%s/") || cmd.starts_with("s/") {
+                            self.handle_substitute(cmd);
                         } else {
                             // Split cmd into command name and args
                             let parts: Vec<&str> = cmd.splitn(2, ' ').collect();
@@ -69,7 +129,7 @@ impl Editor {
                             if !self.engine.plugin_manager.execute_command(cmd_name, args) {
                                 self.engine
                                     .state
-                                    .set_message(format!("Unknown command: {}", cmd));
+                                    .push_message(MessageLevel::Warning, format!("Unknown command: {}", cmd));
                             }
                         }
                     }
@@ -82,15 +142,80 @@ impl Editor {
             }
             KeyCode::Esc => {
                 self.engine.state.command_buffer.clear();
+                self.engine.state.command_cursor_pos = 0;
                 self.transition_mode(Mode::Normal);
                 self.needs_render = true;
             }
             KeyCode::Backspace => {
-                self.engine.state.command_buffer.pop();
+                let pos = self.engine.state.command_cursor_pos;
+                if pos > 0 {
+                    // Find the previous char boundary.
+                    let prev = self.engine.state.command_buffer[..pos]
+                        .char_indices()
+                        .next_back()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.engine.state.command_buffer.drain(prev..pos);
+                    self.engine.state.command_cursor_pos = prev;
+                }
+                self.needs_render = true;
+            }
+            // Ctrl-a: move cursor to beginning of command line
+            KeyCode::Char('a') if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.engine.state.command_cursor_pos = 0;
+                self.needs_render = true;
+            }
+            // Ctrl-e: move cursor to end of command line
+            KeyCode::Char('e') if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.engine.state.command_cursor_pos = self.engine.state.command_buffer.len();
+                self.needs_render = true;
+            }
+            // Ctrl-w: delete word backward
+            KeyCode::Char('w') if modifiers.contains(KeyModifiers::CONTROL) => {
+                let pos = self.engine.state.command_cursor_pos;
+                if pos > 0 {
+                    let buf = &self.engine.state.command_buffer[..pos];
+                    // Skip trailing whitespace, then skip non-whitespace.
+                    let without_trailing = buf.trim_end_matches(' ');
+                    let without_word = without_trailing
+                        .rsplit_once(char::is_whitespace)
+                        .map(|(before, _)| before.len())
+                        .unwrap_or(0);
+                    self.engine.state.command_buffer.drain(without_word..pos);
+                    self.engine.state.command_cursor_pos = without_word;
+                }
                 self.needs_render = true;
             }
             KeyCode::Char(c) => {
-                self.engine.state.command_buffer.push(c);
+                let pos = self.engine.state.command_cursor_pos;
+                self.engine.state.command_buffer.insert(pos, c);
+                self.engine.state.command_cursor_pos = pos + c.len_utf8();
+                self.needs_render = true;
+            }
+            // Left arrow: move cursor left
+            KeyCode::Left => {
+                let pos = self.engine.state.command_cursor_pos;
+                if pos > 0 {
+                    let prev = self.engine.state.command_buffer[..pos]
+                        .char_indices()
+                        .next_back()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.engine.state.command_cursor_pos = prev;
+                }
+                self.needs_render = true;
+            }
+            // Right arrow: move cursor right
+            KeyCode::Right => {
+                let pos = self.engine.state.command_cursor_pos;
+                if pos < self.engine.state.command_buffer.len() {
+                    let next = self.engine.state.command_buffer[pos..]
+                        .char_indices()
+                        .nth(1)
+                        .map(|(i, _)| pos + i)
+                        .unwrap_or(self.engine.state.command_buffer.len());
+                    self.engine.state.command_cursor_pos = next;
+                }
                 self.needs_render = true;
             }
             _ => {}
@@ -148,7 +273,7 @@ impl Editor {
                     return;
                 }
                 if let Err(e) = self.engine.buffer.save_file().await {
-                    self.engine.state.set_message(format!("Save failed: {}", e));
+                    self.engine.state.push_message(MessageLevel::Error, format!("Save failed: {}", e));
                 } else {
                     self.engine
                         .plugin_manager
@@ -157,6 +282,11 @@ impl Editor {
                         });
                     self.running = false;
                     self.engine.state.mode = Mode::Normal;
+                }
+            }
+            ConfirmAction::ReloadDiscard => {
+                if should_quit {
+                    self.reload_file().await;
                 }
             }
         }
@@ -193,12 +323,161 @@ impl Editor {
             "hlsearch!" => {
                 self.engine.state.hlsearch = !self.engine.state.hlsearch;
             }
+            "expandtab" | "et" => {
+                self.engine.state.expandtab = true;
+            }
+            "noexpandtab" | "noet" => {
+                self.engine.state.expandtab = false;
+            }
+            "expandtab!" | "et!" => {
+                self.engine.state.expandtab = !self.engine.state.expandtab;
+            }
+            args if args.starts_with("tabstop=") || args.starts_with("ts=") => {
+                let val = args.splitn(2, '=').nth(1).unwrap_or("8");
+                if let Ok(n) = val.parse::<usize>() {
+                    self.engine.state.tabstop = n;
+                } else {
+                    self.engine
+                        .state
+                        .push_message(MessageLevel::Warning, format!("Invalid value: {}", val));
+                }
+            }
+            args if args.starts_with("shiftwidth=") || args.starts_with("sw=") => {
+                let val = args.splitn(2, '=').nth(1).unwrap_or("4");
+                if let Ok(n) = val.parse::<usize>() {
+                    self.engine.state.shiftwidth = n;
+                } else {
+                    self.engine
+                        .state
+                        .push_message(MessageLevel::Warning, format!("Invalid value: {}", val));
+                }
+            }
+            args if args.starts_with("scrolloff=") || args.starts_with("so=") => {
+                let val = args.splitn(2, '=').nth(1).unwrap_or("0");
+                if let Ok(n) = val.parse::<usize>() {
+                    self.engine.state.scrolloff = n;
+                } else {
+                    self.engine
+                        .state
+                        .push_message(MessageLevel::Warning, format!("Invalid value: {}", val));
+                }
+            }
             _ => {
                 self.engine
                     .state
-                    .set_message(format!("Unknown set option: {}", args));
+                    .push_message(MessageLevel::Warning, format!("Unknown set option: {}", args));
             }
         }
+    }
+
+    /// Handle `:s/pattern/replacement/[g]` and `:%s/pattern/replacement/[g]`.
+    fn handle_substitute(&mut self, cmd: &str) {
+        // Parse the delimiter (always `/` in our implementation).
+        let (range, rest) = if cmd.starts_with("%s/") {
+            ("%", &cmd[3..])
+        } else if cmd.starts_with("s/") {
+            (".", &cmd[2..])
+        } else {
+            self.engine
+                .state
+                .push_message(MessageLevel::Warning, "Invalid substitute command".to_string());
+            return;
+        };
+
+        // Split into pattern / replacement / flags.
+        let parts: Vec<&str> = rest.splitn(3, '/').collect();
+        if parts.len() < 2 {
+            self.engine
+                .state
+                .push_message(MessageLevel::Warning, "Invalid substitute syntax".to_string());
+            return;
+        }
+        let pattern_str = parts[0];
+        let replacement = parts[1];
+        let flags = parts.get(2).copied().unwrap_or("");
+
+        // Compile regex pattern.
+        let re = match regex::Regex::new(pattern_str) {
+            Ok(re) => re,
+            Err(e) => {
+                self.engine
+                    .state
+                    .push_message(MessageLevel::Warning, format!("Regex error: {}", e));
+                return;
+            }
+        };
+
+        let global = flags.contains('g');
+        let line_count = self.engine.buffer.line_count();
+
+        // Determine line range.
+        let (start_line, end_line) = if range == "%" {
+            (1, line_count)
+        } else {
+            let cur = self.engine.state.cursor.line;
+            (cur, cur)
+        };
+
+        let mut replacements = 0;
+
+        // We need to process lines in reverse order if substituting across multiple
+        // lines, because inserts/deletes shift line indices.
+        for line_idx in (start_line..=end_line).rev() {
+            let line = self.engine.buffer.get_line(line_idx);
+            let new_line = if global {
+                re.replace_all(&line, replacement)
+            } else {
+                re.replace(&line, replacement)
+            };
+            if new_line != line {
+                replacements += 1;
+                // Calculate how many chars were added/removed.
+                let old_chars = line.chars().count();
+                let _new_chars = new_line.chars().count();
+                let mod_count = self.engine.buffer.modification_count();
+
+                // Record the edit for undo.
+                use crate::undo::{Edit, EditType};
+                self.engine.undo_manager.push(Edit {
+                    edit_type: EditType::Delete {
+                        line: line_idx,
+                        col: 0,
+                        text: line.trim_end_matches('\n').to_string(),
+                    },
+                    cursor_before: self.engine.state.cursor,
+                    cursor_after: self.engine.state.cursor,
+                    modification_count: mod_count,
+                });
+
+                // Replace the line content.
+                let char_start = self.engine.buffer.line_to_char(line_idx - 1);
+                let char_end = char_start + old_chars;
+                self.engine.buffer.remove_range(char_start, char_end);
+                self.engine
+                    .buffer
+                    .insert(line_idx, 0, new_line.trim_end_matches('\n'));
+
+                self.engine.undo_manager.push(Edit {
+                    edit_type: EditType::Insert {
+                        line: line_idx,
+                        col: 0,
+                        text: new_line.trim_end_matches('\n').to_string(),
+                    },
+                    cursor_before: self.engine.state.cursor,
+                    cursor_after: self.engine.state.cursor,
+                    modification_count: mod_count + 1,
+                });
+            }
+        }
+
+        self.engine.state.dirty = self.engine.buffer.is_dirty();
+        self.engine.state.push_message(MessageLevel::Info, format!(
+            "{} substitutions on {} line{}",
+            replacements,
+            if range == "%" { "all" } else { "1" },
+            if replacements == 1 { "" } else { "s" }
+        ));
+        self.needs_render = true;
     }
 
     async fn reload_file(&mut self) {
@@ -210,14 +489,22 @@ impl Editor {
                 Err(e) => {
                     self.engine
                         .state
-                        .set_message(format!("Failed to reload file: {}", e));
+                        .push_message(MessageLevel::Error, format!("Failed to reload file: {}", e));
                 }
             }
         }
     }
 
     async fn reload_file_discard(&mut self) {
-        self.reload_file().await;
+        if self.engine.buffer.is_dirty() {
+            self.engine.state.set_confirmation(
+                "No write since last change. Reload anyway? (y/n)".to_string(),
+                ConfirmAction::ReloadDiscard,
+            );
+            self.needs_render = true;
+        } else {
+            self.reload_file().await;
+        }
     }
 
     /// Save the current buffer and emit a BufferSave plugin event.
@@ -232,7 +519,7 @@ impl Editor {
                     });
             }
             Err(e) => {
-                self.engine.state.set_message(format!("Save failed: {}", e));
+                self.engine.state.push_message(MessageLevel::Error, format!("Save failed: {}", e));
             }
         }
     }
@@ -240,7 +527,7 @@ impl Editor {
     async fn handle_write_path(&mut self, cmd: &str) {
         let path_str = cmd.trim_start_matches("w!").trim_start_matches("w ").trim();
         if path_str.is_empty() {
-            self.engine.state.set_message("Expected filename after 'w'");
+            self.engine.state.push_message(MessageLevel::Warning, "Expected filename after 'w'");
             return;
         }
         let path = std::path::PathBuf::from(path_str);
@@ -254,7 +541,7 @@ impl Editor {
                     });
             }
             Err(e) => {
-                self.engine.state.set_message(format!("Save failed: {}", e));
+                self.engine.state.push_message(MessageLevel::Error, format!("Save failed: {}", e));
             }
         }
     }
@@ -267,7 +554,7 @@ impl Editor {
         if path_str.is_empty() {
             self.engine
                 .state
-                .set_message("Expected filename after 'wq'");
+                .push_message(MessageLevel::Warning, "Expected filename after 'wq'");
             return;
         }
         let path = std::path::PathBuf::from(path_str);
@@ -282,7 +569,7 @@ impl Editor {
                 self.running = false;
             }
             Err(e) => {
-                self.engine.state.set_message(format!("Save failed: {}", e));
+                self.engine.state.push_message(MessageLevel::Error, format!("Save failed: {}", e));
             }
         }
     }

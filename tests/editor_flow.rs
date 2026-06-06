@@ -1011,3 +1011,276 @@ async fn vim_macro_with_count() {
     let (_, line, _, _) = ed.snapshot_for_test();
     assert_eq!(line, 3, "@a repeated 2j");
 }
+
+// ── New feature tests ────────────────────────────────────────────
+
+#[tokio::test]
+async fn vim_tilde_toggle_case() {
+    let mut ed = test_vim_editor("abc\n");
+    // Move to 'a' (already at col 0) and toggle case
+    ed.handle_key_for_test(KeyCode::Char('~'), KeyModifiers::NONE)
+        .await;
+    let (buf, _, col, _) = ed.snapshot_for_test();
+    assert!(buf.starts_with("Abc"), "toggle 'a' -> 'A': got {:?}", buf);
+    assert_eq!(col, 1, "cursor should advance to col 1");
+}
+
+#[tokio::test]
+async fn vim_tilde_toggle_lowercase() {
+    let mut ed = test_vim_editor("ABC\n");
+    ed.handle_key_for_test(KeyCode::Char('~'), KeyModifiers::NONE)
+        .await;
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert!(buf.starts_with("aBC"), "toggle 'A' -> 'a': got {:?}", buf);
+}
+
+#[tokio::test]
+async fn vim_find_char_cross_line_forward() {
+    let mut ed = test_vim_editor("hello\nworld\n");
+    // 'f' then 'w' should find 'w' on line 2
+    ed.handle_key_for_test(KeyCode::Char('f'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('w'), KeyModifiers::NONE)
+        .await;
+    let (_, line, col, _) = ed.snapshot_for_test();
+    assert_eq!(line, 2, "cross-line f should go to line 2");
+    assert_eq!(col, 0, "cross-line f should land on col 0");
+}
+
+#[tokio::test]
+async fn vim_find_char_backward_cross_line() {
+    let mut ed = test_vim_editor("hello\nworld\n");
+    // Move to line 2 col 2
+    ed.engine.state.cursor.line = 2;
+    ed.engine.state.cursor.col = 2;
+    // 'F' then 'e' should find 'e' on line 1
+    ed.handle_key_for_test(KeyCode::Char('F'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('e'), KeyModifiers::NONE)
+        .await;
+    let (_, line, col, _) = ed.snapshot_for_test();
+    assert_eq!(line, 1, "backward F should go to line 1");
+    assert_eq!(col, 1, "backward F should land on col 1");
+}
+
+#[tokio::test]
+async fn vim_till_char_cross_line() {
+    let mut ed = test_vim_editor("hello\nworld\n");
+    // 't' then 'o' should find 'o' on line 2 and land before it
+    ed.handle_key_for_test(KeyCode::Char('t'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('o'), KeyModifiers::NONE)
+        .await;
+    let (_, line, col, _) = ed.snapshot_for_test();
+    // t forward to next line: cursor ends up at end of line 1
+    assert_eq!(line, 1, "cross-line t should be on line 1 (before line 2 char)");
+    assert_eq!(col, 3, "till char should be at col 3 (before 'o' on line 2)");
+}
+
+#[tokio::test]
+async fn vim_text_object_iW() {
+    // iw on "hello world" should select "hello" (word)
+    let mut ed = test_vim_editor("hello world\n");
+    ed.engine.state.cursor.line = 1;
+    ed.engine.state.cursor.col = 0;
+
+    // d i W
+    ed.handle_key_for_test(KeyCode::Char('d'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('i'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('W'), KeyModifiers::NONE)
+        .await;
+
+    let (buf, _, col, _) = ed.snapshot_for_test();
+    // iW deletes the WORD under cursor = "hello"
+    assert_eq!(buf.trim(), "world", "iW should delete WORD 'hello'");
+    assert_eq!(col, 0, "cursor at col 0 after delete");
+}
+
+#[tokio::test]
+async fn vim_replace_mode_undo_group() {
+    let mut ed = test_vim_editor("abc\n");
+    // Enter replace mode with R
+    ed.handle_key_for_test(KeyCode::Char('R'), KeyModifiers::NONE)
+        .await;
+
+    // Type some chars
+    ed.handle_key_for_test(KeyCode::Char('X'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('Y'), KeyModifiers::NONE)
+        .await;
+
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert_eq!(buf.trim(), "XYc", "replace mode should replace chars");
+
+    // Exit replace mode
+    ed.handle_key_for_test(KeyCode::Esc, KeyModifiers::NONE)
+        .await;
+
+    // Undo should revert the whole replace session
+    ed.handle_key_for_test(KeyCode::Char('u'), KeyModifiers::NONE)
+        .await;
+
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert_eq!(buf.trim(), "abc", "undo after replace should restore original");
+}
+
+#[tokio::test]
+async fn vim_dot_repeat_join() {
+    let mut ed = test_vim_editor("line1\nline2\nline3\n");
+
+    // Join lines with J
+    ed.handle_key_for_test(KeyCode::Char('J'), KeyModifiers::NONE)
+        .await;
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert!(buf.starts_with("line1 line2"), "J should join: got {:?}", buf);
+
+    // Move to beginning of current line first, then . to repeat
+    ed.handle_key_for_test(KeyCode::Char('0'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('.'), KeyModifiers::NONE)
+        .await;
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert!(
+        buf.contains("line1 line2 line3"),
+        ". should repeat J: got {:?}",
+        buf
+    );
+}
+
+#[tokio::test]
+async fn vim_indent_uses_expandtab() {
+    let mut ed = test_vim_editor("hello\n");
+    // Set expandtab
+    ed.engine.state.expandtab = true;
+    ed.engine.state.shiftwidth = 4;
+
+    // >> to indent
+    ed.handle_key_for_test(KeyCode::Char('>'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('>'), KeyModifiers::NONE)
+        .await;
+
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert!(
+        buf.starts_with("    hello"),
+        ">> with expandtab should insert 4 spaces: got {:?}",
+        buf
+    );
+}
+
+#[tokio::test]
+async fn vim_multibuffer_switch() {
+    let mut ed = test_vim_editor("buffer1\n");
+
+    // Open another buffer
+    let _ = ed.engine.buffer_open("buffer2.txt"); // Will fail since file doesn't exist, but that's OK
+
+    // Manually set up a second buffer for testing
+    let mut buf2 = ijevim::buffer::TextBuffer::new();
+    buf2.insert(1, 0, "buffer2 content\n");
+    let undo2 = ijevim::undo::UndoManager::new();
+    ed.engine.inactive_buffers.push((
+        buf2,
+        undo2,
+        Some(std::path::PathBuf::from("buffer2.txt")),
+        ijevim::types::Position { line: 1, col: 0 },
+    ));
+
+    // Switch to next buffer
+    ed.engine.buffer_next().unwrap();
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert_eq!(
+        buf.trim(),
+        "buffer2 content",
+        "bn should switch to buffer2"
+    );
+
+    // Switch back
+    ed.engine.buffer_prev().unwrap();
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert_eq!(buf.trim(), "buffer1", "bp should switch back to buffer1");
+}
+
+#[tokio::test]
+async fn vim_dot_repeat_indent() {
+    let mut ed = test_vim_editor("line1\nline2\n");
+
+    // >> to indent
+    ed.handle_key_for_test(KeyCode::Char('>'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('>'), KeyModifiers::NONE)
+        .await;
+
+    // Move down
+    ed.handle_key_for_test(KeyCode::Char('j'), KeyModifiers::NONE)
+        .await;
+
+    // Repeat indent with .
+    ed.handle_key_for_test(KeyCode::Char('.'), KeyModifiers::NONE)
+        .await;
+
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    // Both lines should be indented (tab or spaces depending on expandtab)
+    let lines: Vec<&str> = buf.lines().collect();
+    assert!(lines[0].chars().next() == Some('\t') || lines[0].starts_with("    "), "line1 should be indented");
+    assert!(lines[1].chars().next() == Some('\t') || lines[1].starts_with("    "), "line2 should be indented by dot repeat");
+}
+
+#[tokio::test]
+async fn vim_command_line_ctrl_a_ctrl_e() {
+    let mut ed = test_vim_editor("hello\n");
+
+    // Enter command mode
+    ed.handle_key_for_test(KeyCode::Char(':'), KeyModifiers::NONE)
+        .await;
+
+    // Type some text
+    ed.handle_key_for_test(KeyCode::Char('h'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('e'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('l'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('l'), KeyModifiers::NONE)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('o'), KeyModifiers::NONE)
+        .await;
+
+    assert_eq!(ed.engine.state.command_buffer, "hello");
+    assert_eq!(ed.engine.state.command_cursor_pos, 5);
+
+    // Ctrl-a to go to beginning
+    ed.handle_key_for_test(KeyCode::Char('a'), KeyModifiers::CONTROL)
+        .await;
+    assert_eq!(ed.engine.state.command_cursor_pos, 0);
+
+    // Ctrl-e to go to end
+    ed.handle_key_for_test(KeyCode::Char('e'), KeyModifiers::CONTROL)
+        .await;
+    assert_eq!(ed.engine.state.command_cursor_pos, 5);
+}
+
+#[tokio::test]
+async fn vim_command_line_ctrl_w() {
+    let mut ed = test_vim_editor("hello\n");
+
+    // Enter command mode
+    ed.handle_key_for_test(KeyCode::Char(':'), KeyModifiers::NONE)
+        .await;
+
+    // Type "foo bar"
+    for c in "foo bar".chars() {
+        ed.handle_key_for_test(KeyCode::Char(c), KeyModifiers::NONE)
+            .await;
+    }
+
+    assert_eq!(ed.engine.state.command_buffer, "foo bar");
+
+    // Ctrl-w to delete word backward
+    ed.handle_key_for_test(KeyCode::Char('w'), KeyModifiers::CONTROL)
+        .await;
+
+    assert_eq!(ed.engine.state.command_buffer, "foo", "Ctrl-w should delete ' bar'");
+}

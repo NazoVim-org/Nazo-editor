@@ -8,6 +8,8 @@ pub(crate) mod search;
 pub(crate) mod text_object;
 pub(crate) mod visual;
 
+use std::collections::VecDeque;
+
 use crate::buffer::TextBuffer;
 use crate::config::Config;
 use crate::engine::{Engine, EngineResult};
@@ -15,7 +17,7 @@ use crate::keymap::{create_keymap, KeymapHandler};
 use crate::plugin::PluginManager;
 use crate::renderer::Renderer;
 use crate::terminal::Terminal;
-use crate::types::{EditorState, Keymap, Mode, Position, Result};
+use crate::types::{EditorState, Keymap, MessageLevel, Mode, Position, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use std::cell::RefCell;
 use std::io;
@@ -58,7 +60,7 @@ impl Editor {
             self.running = running;
         }
         if let Some(msg) = r.message {
-            self.engine.state.set_message(msg);
+            self.engine.state.push_message(MessageLevel::Info, msg);
         }
         if let Some((msg, action)) = r.confirmation {
             self.engine.state.set_confirmation(msg, action);
@@ -146,12 +148,14 @@ impl Editor {
         if let Err(e) = self.renderer.render(
             &mut self.terminal,
             &self.engine.buffer,
+            &self.engine.inactive_buffers,
             &self.engine.state,
+            &self.engine.window_layout,
             &self.engine.highlights,
         ) {
             self.engine
                 .state
-                .set_message(format!("Render error: {}", e));
+                .push_message(MessageLevel::Error, format!("Render error: {}", e));
         }
         self.needs_render = false;
 
@@ -170,13 +174,16 @@ impl Editor {
                     Ok(Event::Resize(_, _)) => {
                         self.terminal.update_size();
                         self.terminal.clear_cache();
+                        let rows = self.terminal.rows() as usize;
+                        let cols = self.terminal.cols() as usize;
+                        self.engine.update_window_layout(rows, cols);
                         self.needs_render = true;
                     }
                     Ok(_) => {}
                     Err(e) => {
                         self.engine
                             .state
-                            .set_message(format!("Event read error: {}", e));
+                            .push_message(MessageLevel::Error, format!("Event read error: {}", e));
                     }
                 }
             }
@@ -200,12 +207,14 @@ impl Editor {
                 if let Err(e) = self.renderer.render(
                     &mut self.terminal,
                     &self.engine.buffer,
+                    &self.engine.inactive_buffers,
                     &self.engine.state,
+                    &self.engine.window_layout,
                     &self.engine.highlights,
                 ) {
                     self.engine
                         .state
-                        .set_message(format!("Render error: {}", e));
+                        .push_message(MessageLevel::Error, format!("Render error: {}", e));
                 }
                 self.needs_render = false;
             }
@@ -261,13 +270,13 @@ impl Editor {
     pub fn switch_keymap(&mut self, name: &str) {
         let keymap = match name {
             "vim" => Keymap::Vim,
-            "emacs" => Keymap::Emacs,
-            _ => {
-                self.engine
-                    .state
-                    .set_message(format!("Unknown keymap: {} (use vim or emacs)", name));
-                return;
-            }
+        "emacs" => Keymap::Emacs,
+        _ => {
+            self.engine
+                .state
+                .push_message(MessageLevel::Warning, format!("Unknown keymap: {} (use vim or emacs)", name));
+            return;
+        }
         };
         self.keymap_handler = create_keymap(keymap);
         self.engine.reset_state_for_keymap_switch();
@@ -314,6 +323,7 @@ mod tests {
             file_path: None,
             dirty: false,
             command_buffer: String::new(),
+            command_cursor_pos: 0,
             last_message: None,
             visual_start: None,
             visual_type: None,
@@ -328,6 +338,11 @@ mod tests {
             wrap: true,
             mark: None,
             region_active: false,
+            tabstop: 8,
+            shiftwidth: 4,
+            expandtab: false,
+            scrolloff: 0,
+            message_history: VecDeque::new(),
         };
 
         Editor {

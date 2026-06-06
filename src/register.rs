@@ -3,6 +3,10 @@ use std::io;
 
 pub struct Register {
     registers: HashMap<char, String>,
+    /// Numbered registers 0-9: 0 = last yank, 1-9 = last 9 deletions.
+    numbered: [String; 10],
+    /// Small-delete register: stores single-line deletions.
+    small_delete: String,
     default_register: char,
 }
 
@@ -17,6 +21,8 @@ impl Register {
 
         Self {
             registers,
+            numbered: Default::default(),
+            small_delete: String::new(),
             default_register: '"',
         }
     }
@@ -30,7 +36,40 @@ impl Register {
         }
     }
 
+    /// Set a numbered register directly.
+    pub fn set_numbered(&mut self, index: usize, content: &str) {
+        if index < 10 {
+            self.numbered[index] = content.to_string();
+        }
+    }
+
+    /// Push a deletion into the numbered register ring (shift 1-9 down, store in 1).
+    pub fn push_numbered_deletion(&mut self, content: &str) {
+        // Shift 8→9, 7→8, ..., 1→2
+        for i in (2..=9).rev() {
+            self.numbered[i] = self.numbered[i - 1].clone();
+        }
+        self.numbered[1] = content.to_string();
+    }
+
+    /// Set the yank register (register 0).
+    pub fn set_yank_register(&mut self, content: &str) {
+        self.numbered[0] = content.to_string();
+    }
+
+    /// Set the small-delete register.
+    pub fn set_small_delete(&mut self, content: &str) {
+        self.small_delete = content.to_string();
+    }
+
     pub fn get(&self, name: char) -> String {
+        if name.is_ascii_digit() {
+            let idx = (name as u8 - b'0') as usize;
+            return self.numbered[idx].clone();
+        }
+        if name == '-' {
+            return self.small_delete.clone();
+        }
         let reg = name.to_ascii_lowercase();
         self.registers.get(&reg).cloned().unwrap_or_default()
     }

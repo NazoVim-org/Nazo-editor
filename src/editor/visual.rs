@@ -75,11 +75,7 @@ impl Editor {
                 self.needs_render = true;
             }
             KeyCode::Char('l') => {
-                let line_len = self
-                    .engine
-                    .buffer
-                    .get_line(self.engine.state.cursor.line)
-                    .len();
+                let line_len = self.engine.buffer.line_char_len(self.engine.state.cursor.line);
                 self.engine.state.cursor.col =
                     (self.engine.state.cursor.col + 1).min(line_len.saturating_sub(1));
                 self.needs_render = true;
@@ -120,11 +116,11 @@ impl Editor {
             }
             KeyCode::Char('$') => {
                 let line = self.engine.buffer.get_line(self.engine.state.cursor.line);
-                let line_len = line.len();
-                self.engine.state.cursor.col = if line_len > 0 && line.ends_with('\n') {
-                    line_len.saturating_sub(2)
+                let line_char_len = self.engine.buffer.line_char_len(self.engine.state.cursor.line);
+                self.engine.state.cursor.col = if line_char_len > 0 && line.ends_with('\n') {
+                    line_char_len.saturating_sub(2)
                 } else {
-                    line_len.saturating_sub(1)
+                    line_char_len.saturating_sub(1)
                 };
                 self.needs_render = true;
             }
