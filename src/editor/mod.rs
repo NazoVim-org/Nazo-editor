@@ -317,6 +317,8 @@ mod tests {
             last_message: None,
             visual_start: None,
             visual_type: None,
+            last_visual_start: None,
+            last_visual_type: None,
             marks: crate::types::Marks::new(),
             macros: crate::types::Macros::new(),
             confirmation_prompt: None,
