@@ -1235,11 +1235,11 @@ async fn vim_dot_repeat_indent() {
     // Both lines should be indented (tab or spaces depending on expandtab)
     let lines: Vec<&str> = buf.lines().collect();
     assert!(
-        lines[0].chars().next() == Some('\t') || lines[0].starts_with("    "),
+        lines[0].starts_with('\t') || lines[0].starts_with("    "),
         "line1 should be indented"
     );
     assert!(
-        lines[1].chars().next() == Some('\t') || lines[1].starts_with("    "),
+        lines[1].starts_with('\t') || lines[1].starts_with("    "),
         "line2 should be indented by dot repeat"
     );
 }
