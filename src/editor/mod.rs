@@ -230,8 +230,10 @@ impl Editor {
         // Borrow the handler, call the method to get the future, then drop the
         // borrow before awaiting. The future borrows `self` (Editor) but not
         // the keymap handler, avoiding RefCell borrow issues across await.
-        let handler = keymap_handler.borrow();
-        let future = handler.handle_key(self, key, modifiers);
+        let future = {
+            let handler = keymap_handler.borrow();
+            handler.handle_key(self, key, modifiers)
+        };
         future.await;
     }
 
