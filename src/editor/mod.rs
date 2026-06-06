@@ -145,6 +145,15 @@ impl Editor {
     pub async fn run(&mut self) -> io::Result<()> {
         self.running = true;
 
+        // Initialize the window layout to the actual terminal size.
+        // Without this the layout stays at the hardcoded 24×80 default from
+        // Engine::new() and content would be drawn for the wrong dimensions.
+        {
+            let rows = self.terminal.rows() as usize;
+            let cols = self.terminal.cols() as usize;
+            self.engine.update_window_layout(rows, cols);
+        }
+
         if let Err(e) = self.renderer.render(
             &mut self.terminal,
             &self.engine.buffer,

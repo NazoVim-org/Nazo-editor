@@ -117,8 +117,12 @@ impl Terminal {
 
     /// Write raw bytes to the terminal output buffer.
     /// Used by ScreenBuffer-based rendering.
+    /// Flushes after every write to ensure the rendered frame is actually sent
+    /// to the terminal — without this the `BufWriter` would buffer indefinitely
+    /// since frames are typically well below its 8 KB auto-flush threshold.
     pub fn write_raw(&mut self, data: &[u8]) -> io::Result<()> {
-        self.stdout.write_all(data)
+        self.stdout.write_all(data)?;
+        self.stdout.flush()
     }
 
     pub fn flush(&mut self) -> io::Result<()> {
