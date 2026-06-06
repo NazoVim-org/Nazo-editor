@@ -6,6 +6,22 @@ use crate::types::{EditorState, MessageLevel, Mode, Window, WindowLayout};
 use crossterm::style::Color;
 use std::io;
 
+/// Render context for a single window.
+struct WindowRenderContext<'a> {
+    window: &'a Window,
+    active_buffer: &'a TextBuffer,
+    inactive_buffers: &'a [(
+        TextBuffer,
+        crate::undo::UndoManager,
+        Option<std::path::PathBuf>,
+        crate::types::Position,
+    )],
+    state: &'a EditorState,
+    highlights: &'a [Vec<(Style, String)>],
+    is_focused: bool,
+    total_cols: usize,
+}
+
 /// One visual (display) row produced from wrapping a buffer line.
 #[allow(dead_code)]
 struct VisualLine {
@@ -79,15 +95,15 @@ impl Renderer {
         // Render each window
         for (idx, window) in window_layout.windows.iter().enumerate() {
             let is_focused = idx == window_layout.focused;
-            self.render_window(
+            self.render_window(WindowRenderContext {
                 window,
                 active_buffer,
                 inactive_buffers,
                 state,
                 highlights,
                 is_focused,
-                cols,
-            );
+                total_cols: cols,
+            });
         }
 
         // Draw window separators
@@ -111,21 +127,15 @@ impl Renderer {
     }
 
     /// Render a single window into its viewport.
-    fn render_window(
-        &mut self,
-        window: &Window,
-        active_buffer: &TextBuffer,
-        inactive_buffers: &[(
-            TextBuffer,
-            crate::undo::UndoManager,
-            Option<std::path::PathBuf>,
-            crate::types::Position,
-        )],
-        state: &EditorState,
-        highlights: &[Vec<(Style, String)>],
-        _is_focused: bool,
-        total_cols: usize,
-    ) {
+    fn render_window(&mut self, ctx: WindowRenderContext<'_>) {
+        let window = ctx.window;
+        let active_buffer = ctx.active_buffer;
+        let inactive_buffers = ctx.inactive_buffers;
+        let state = ctx.state;
+        let highlights = ctx.highlights;
+        let _is_focused = ctx.is_focused;
+        let total_cols = ctx.total_cols;
+
         let window_rows = window.row_end.saturating_sub(window.row_start);
         if window_rows == 0 || window.col_end <= window.col_start {
             return;
@@ -456,6 +466,12 @@ impl Renderer {
                 ..CellStyle::default()
             },
         );
+    }
+}
+
+impl Default for Renderer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
