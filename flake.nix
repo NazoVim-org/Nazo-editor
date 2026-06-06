@@ -53,6 +53,9 @@
               rustfmt
               clippy
               cargo-audit
+              git
+              gh
+              opencode
             ];
 
             LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
@@ -66,12 +69,12 @@
               echo "╔═══════════════════════════════════════════════╗"
               echo "║             ijevim devShell                   ║"
               echo "╠═══════════════════════════════════════════════╣"
-              echo "║ Build:  cargo build                          ║"
+              echo "║ Build:  cargo build                           ║"
               echo "║ Run:    cargo run -- <file>                   ║"
-              echo "║ Test:   cargo test                           ║"
-              echo "║ Clippy: cargo clippy                         ║"
-              echo "║ Audit:  cargo audit                          ║"
-              echo "║ Binary: ivim                                 ║"
+              echo "║ Test:   cargo test                            ║"
+              echo "║ Clippy: cargo clippy                          ║"
+              echo "║ Audit:  cargo audit                           ║"
+              echo "║ Binary: ivim                                  ║"
               echo "╚═══════════════════════════════════════════════╝"
             '';
           };

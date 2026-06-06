@@ -112,7 +112,7 @@ impl Renderer {
         // Render global status bar (last row)
         self.render_status_bar(rows, cols, state);
 
-        // Position hardware cursor at focused window's cursor
+        // Position visual cursor at focused window's cursor position.
         if let Some(focused_window) = window_layout.windows.get(window_layout.focused) {
             self.position_cursor(focused_window, state, cols);
         }
@@ -289,6 +289,8 @@ impl Renderer {
 
     /// Get the cursor line for the focused window (for line highlighting).
     fn get_focused_cursor_line(&self, window: &Window) -> usize {
+        // Use window.cursor (synced via state.cursor each render) for the focused line.
+        // In practice this is always the same as state.cursor for the active buffer.
         window.cursor.line
     }
 
@@ -444,18 +446,18 @@ impl Renderer {
     }
 
     /// Position the hardware cursor at the focused window's cursor position.
-    fn position_cursor(&mut self, window: &Window, _state: &EditorState, _total_cols: usize) {
+    fn position_cursor(&mut self, window: &Window, state: &EditorState, _total_cols: usize) {
         // Calculate screen position from window's cursor
         // For simplicity, use the window's cursor directly
         // In a full implementation, this would account for wrapping
         let row = window.row_start
-            + (window.cursor.line.saturating_sub(window.scroll_top)).min(
+            + (state.cursor.line.saturating_sub(window.scroll_top)).min(
                 window
                     .row_end
                     .saturating_sub(window.row_start)
                     .saturating_sub(1),
             );
-        let col = window.col_start + window.cursor.col;
+        let col = window.col_start + state.cursor.col;
         self.screen.set_cell(
             row,
             col,
