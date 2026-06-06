@@ -112,9 +112,23 @@ impl Renderer {
         // Render global status bar (last row)
         self.render_status_bar(rows, cols, state);
 
+        // Compute line number prefix for cursor positioning (same logic as render_window).
+        let show_any_numbers = state.show_line_numbers || state.show_relative_numbers;
+        let line_number_width = if show_any_numbers {
+            let total = active_buffer.line_count().max(1);
+            total.to_string().len()
+        } else {
+            0
+        };
+        let line_number_prefix = if show_any_numbers {
+            line_number_width + 2
+        } else {
+            0
+        };
+
         // Position visual cursor at focused window's cursor position.
         if let Some(focused_window) = window_layout.windows.get(window_layout.focused) {
-            self.position_cursor(focused_window, state, cols);
+            self.position_cursor(focused_window, state, cols, line_number_prefix);
         }
 
         // Emit frame to terminal
@@ -445,11 +459,14 @@ impl Renderer {
         }
     }
 
-    /// Position the hardware cursor at the focused window's cursor position.
-    fn position_cursor(&mut self, window: &Window, state: &EditorState, _total_cols: usize) {
-        // Calculate screen position from window's cursor
-        // For simplicity, use the window's cursor directly
-        // In a full implementation, this would account for wrapping
+    /// Position a visual block cursor at the focused window's cursor position.
+    fn position_cursor(
+        &mut self,
+        window: &Window,
+        state: &EditorState,
+        _total_cols: usize,
+        line_number_prefix: usize,
+    ) {
         let row = window.row_start
             + (state.cursor.line.saturating_sub(window.scroll_top)).min(
                 window
@@ -457,7 +474,9 @@ impl Renderer {
                     .saturating_sub(window.row_start)
                     .saturating_sub(1),
             );
-        let col = window.col_start + state.cursor.col;
+        // Column = window offset + line number gutter + buffer column.
+        // This places the cursor exactly where the content character sits.
+        let col = window.col_start + line_number_prefix + state.cursor.col;
         self.screen.set_cell(
             row,
             col,
