@@ -223,15 +223,16 @@ impl Editor {
         Ok(())
     }
 
-    #[allow(clippy::await_holding_refcell_ref)]
     async fn handle_key(&mut self, key: KeyCode, modifiers: KeyModifiers) {
         // Clear transient message on next key press (Vim-like behaviour).
         self.engine.state.clear_message();
         let keymap_handler = Rc::clone(&self.keymap_handler);
-        keymap_handler
-            .borrow_mut()
-            .handle_key(self, key, modifiers)
-            .await;
+        // Borrow the handler, call the method to get the future, then drop the
+        // borrow before awaiting. The future borrows `self` (Editor) but not
+        // the keymap handler, avoiding RefCell borrow issues across await.
+        let handler = keymap_handler.borrow();
+        let future = handler.handle_key(self, key, modifiers);
+        future.await;
     }
 
     /// Emit a key-press event to the plugin system and record macros if recording.

@@ -18,12 +18,12 @@ impl Default for VimKeymap {
 }
 
 impl KeymapHandler for VimKeymap {
-    fn handle_key<'a>(
-        &'a mut self,
-        editor: &'a mut Editor,
+    fn handle_key<'e>(
+        &self,
+        editor: &'e mut Editor,
         key: KeyCode,
         modifiers: KeyModifiers,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'e>> {
         Box::pin(async move {
             editor.emit_key_event(key, modifiers);
 
