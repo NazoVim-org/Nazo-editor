@@ -4,31 +4,21 @@ use crate::types::Mode;
 use crate::types::PluginEvent;
 use crossterm::event::{KeyCode, KeyModifiers};
 
-pub struct EmacsKeymap {
-    prefix_state: EmacsPrefixState,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum EmacsPrefixState {
-    None,
-    WaitingCx,
-}
+pub struct EmacsKeymap;
 
 impl EmacsKeymap {
     pub fn new() -> Self {
-        Self {
-            prefix_state: EmacsPrefixState::None,
-        }
+        Self
     }
 }
 
 impl KeymapHandler for EmacsKeymap {
-    fn handle_key<'a>(
-        &'a mut self,
-        editor: &'a mut Editor,
+    fn handle_key<'e>(
+        &self,
+        editor: &'e mut Editor,
         key: KeyCode,
         modifiers: KeyModifiers,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'e>> {
         Box::pin(async move {
             let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
             let has_alt = modifiers.contains(KeyModifiers::ALT);
@@ -40,46 +30,45 @@ impl KeymapHandler for EmacsKeymap {
                 return;
             }
 
-            match self.prefix_state {
-                EmacsPrefixState::WaitingCx => {
-                    self.prefix_state = EmacsPrefixState::None;
-                    match (has_ctrl, key) {
-                        (true, KeyCode::Char('s')) => {
-                            editor.save_file_async().await;
-                            return;
-                        }
-                        (true, KeyCode::Char('c')) => {
-                            editor.handle_quit();
-                            return;
-                        }
-                        (true, KeyCode::Char('h')) => {
-                            editor.cursor_line_start();
-                            return;
-                        }
-                        (true, KeyCode::Char('d')) => {
-                            editor.cursor_line_end();
-                            return;
-                        }
-                        // C-x u / C-x C-/: redo
-                        (false, KeyCode::Char('u')) => {
-                            editor.redo();
-                            editor.needs_render = true;
-                            return;
-                        }
-                        (true, KeyCode::Char('/')) => {
-                            editor.redo();
-                            editor.needs_render = true;
-                            return;
-                        }
-                        _ => {}
+            // Handle C-x prefix state (stored in operator_state)
+            if editor.engine.operator_state.emacs_cx_prefix {
+                editor.engine.operator_state.emacs_cx_prefix = false;
+
+                match (has_ctrl, key) {
+                    (true, KeyCode::Char('s')) => {
+                        editor.save_file_async().await;
+                        return;
                     }
+                    (true, KeyCode::Char('c')) => {
+                        editor.handle_quit();
+                        return;
+                    }
+                    (true, KeyCode::Char('h')) => {
+                        editor.cursor_line_start();
+                        return;
+                    }
+                    (true, KeyCode::Char('d')) => {
+                        editor.cursor_line_end();
+                        return;
+                    }
+                    // C-x u / C-x C-/: redo
+                    (false, KeyCode::Char('u')) => {
+                        editor.redo();
+                        editor.needs_render = true;
+                        return;
+                    }
+                    (true, KeyCode::Char('/')) => {
+                        editor.redo();
+                        editor.needs_render = true;
+                        return;
+                    }
+                    _ => {}
                 }
-                EmacsPrefixState::None => {}
             }
 
             match (has_ctrl, key) {
                 (true, KeyCode::Char('x')) => {
-                    self.prefix_state = EmacsPrefixState::WaitingCx;
+                    editor.engine.operator_state.emacs_cx_prefix = true;
                 }
                 (true, KeyCode::Char('f')) => {
                     editor.cursor_right(1);

@@ -13,15 +13,17 @@ pub use vim::VimKeymap;
 
 /// Single-threaded TUI key dispatcher.
 ///
-/// NOT Send/Sync by design: keymap handlers use interior mutability patterns
-/// (`Rc<RefCell<...>>`) and are bound to the main event loop.
+/// Keymap handlers use interior mutability for their own state (e.g., Emacs
+/// prefix keys), so the trait takes `&self`. The returned future borrows the
+/// `Editor` but not the keymap handler itself, avoiding `RefCell` borrow
+/// issues across `.await` points.
 pub trait KeymapHandler {
-    fn handle_key<'a>(
-        &'a mut self,
-        editor: &'a mut Editor,
+    fn handle_key<'e>(
+        &self,
+        editor: &'e mut Editor,
         key: KeyCode,
         modifiers: KeyModifiers,
-    ) -> Pin<Box<dyn Future<Output = ()> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = ()> + 'e>>;
 }
 
 pub fn create_keymap(keymap: crate::types::Keymap) -> Rc<RefCell<dyn KeymapHandler>> {

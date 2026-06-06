@@ -34,6 +34,8 @@ pub struct OperatorState {
     pub replace_char: Option<char>,
     /// Ctrl-w prefix: waiting for second key (w, j, k, h, l, c, =, _, |, etc.)
     pub ctrl_w_prefix: bool,
+    /// Emacs C-x prefix: waiting for second key (s, c, h, d, u, /, etc.)
+    pub emacs_cx_prefix: bool,
 }
 
 impl OperatorState {
@@ -46,6 +48,7 @@ impl OperatorState {
         self.macro_play = None;
         self.replace_char = None;
         self.ctrl_w_prefix = false;
+        self.emacs_cx_prefix = false;
     }
 
     /// Take the accumulated count, defaulting to 1 if absent.

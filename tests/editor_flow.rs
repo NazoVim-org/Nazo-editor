@@ -687,6 +687,130 @@ async fn emacs_ctrl_x_u_redo() {
     assert_eq!(buf, "helloworld\n", "C-x u redid deletion");
 }
 
+// ── Emacs C-x C-s save file ────────────────────────────────
+#[tokio::test]
+async fn emacs_ctrl_x_ctrl_s_saves_file() {
+    use std::fs;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    let mut temp_file = NamedTempFile::new().expect("temp file");
+    let path = temp_file.path().to_path_buf();
+
+    // Write initial content
+    temp_file.write_all(b"original\n").expect("write initial");
+    temp_file.flush().expect("flush");
+
+    let mut ed = Editor::new_headless_for_test(Keymap::Emacs).expect("headless");
+    ed.set_buffer_for_test("modified\n");
+
+    // Set buffer's file path using public API
+    ed.engine.buffer.set_file_path(Some(path.clone()));
+
+    // C-x C-s to save
+    ed.handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('s'), KeyModifiers::CONTROL)
+        .await;
+
+    let saved = fs::read_to_string(&path).expect("read saved");
+    assert_eq!(saved, "modified\n", "C-x C-s saved the file");
+}
+
+// ── Emacs C-x C-c quit ─────────────────────────────────────
+#[tokio::test]
+async fn emacs_ctrl_x_ctrl_c_quits() {
+    let mut ed = Editor::new_headless_for_test(Keymap::Emacs).expect("headless");
+    ed.running = true; // headless test editor needs running = true
+    ed.set_buffer_for_test("hello\n");
+    // Make buffer dirty by deleting a character (C-d in Emacs mode)
+    ed.handle_key_for_test(KeyCode::Char('d'), KeyModifiers::CONTROL)
+        .await; // delete 'h'
+    assert!(
+        ed.engine.buffer.is_dirty(),
+        "buffer should be dirty after C-d"
+    );
+
+    // C-x C-c should trigger quit confirmation
+    ed.handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('c'), KeyModifiers::CONTROL)
+        .await;
+
+    assert!(
+        ed.engine.state.has_confirmation(),
+        "C-x C-c triggers quit confirmation"
+    );
+    assert!(ed.running, "editor still running after confirmation prompt");
+
+    // Accept quit with 'y'
+    ed.handle_key_for_test(KeyCode::Char('y'), KeyModifiers::NONE)
+        .await;
+    assert!(!ed.running, "editor quit after 'y'");
+}
+
+// ── Emacs C-x h / C-x d line start/end ──────────────────────
+
+#[tokio::test]
+async fn emacs_ctrl_x_h_moves_to_line_start() {
+    let mut ed = Editor::new_headless_for_test(Keymap::Emacs).expect("headless");
+    ed.set_buffer_for_test("hello world\n");
+    ed.engine.state.cursor.col = 5; // Middle of "hello"
+
+    ed.handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('h'), KeyModifiers::CONTROL)
+        .await;
+
+    assert_eq!(ed.engine.state.cursor.col, 0, "C-x h moved to line start");
+}
+
+#[tokio::test]
+async fn emacs_ctrl_x_d_moves_to_line_end() {
+    let mut ed = Editor::new_headless_for_test(Keymap::Emacs).expect("headless");
+    ed.set_buffer_for_test("hello world\n");
+    ed.engine.state.cursor.col = 2; // Near start
+
+    ed.handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('d'), KeyModifiers::CONTROL)
+        .await;
+
+    assert_eq!(
+        ed.engine.state.cursor.col, 11,
+        "C-x d moved to line end (before newline)"
+    );
+}
+
+// ── Emacs C-x C-/ redo ──────────────────────────────────────
+
+#[tokio::test]
+async fn emacs_ctrl_x_ctrl_slash_redo() {
+    let mut ed = Editor::new_headless_for_test(Keymap::Emacs).expect("headless");
+    ed.set_buffer_for_test("hello world\n");
+    ed.engine.state.cursor.col = 5;
+
+    // C-d delete space
+    ed.handle_key_for_test(KeyCode::Char('d'), KeyModifiers::CONTROL)
+        .await;
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert_eq!(buf, "helloworld\n", "C-d deleted space");
+
+    // Undo with C-/
+    ed.handle_key_for_test(KeyCode::Char('/'), KeyModifiers::CONTROL)
+        .await;
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert_eq!(buf, "hello world\n", "C-/ undid deletion");
+
+    // C-x C-/ redo
+    ed.handle_key_for_test(KeyCode::Char('x'), KeyModifiers::CONTROL)
+        .await;
+    ed.handle_key_for_test(KeyCode::Char('/'), KeyModifiers::CONTROL)
+        .await;
+    let (buf, _, _, _) = ed.snapshot_for_test();
+    assert_eq!(buf, "helloworld\n", "C-x C-/ redid deletion");
+}
+
 // ── Emacs C-y yank from kill ring ──────────────────────────
 
 #[tokio::test]
