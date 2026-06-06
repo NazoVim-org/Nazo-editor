@@ -471,13 +471,13 @@ impl Renderer {
 
     /// Position a visual block cursor at the focused window's cursor position.
     ///
-    /// Computes the correct visual row and column on-the-fly using
-    /// [`wrapped_rows`] so the cursor follows the actual visual layout of
-    /// wrapped lines without needing any cache.
+    /// Uses `window.cursor` (synced with `state.cursor` by the editor before
+    /// every render) and computes the visual row/column on the fly via
+    /// [`wrapped_rows`] so wrapped lines are handled correctly.
     fn position_cursor(
         &mut self,
         window: &Window,
-        state: &EditorState,
+        _state: &EditorState,
         buffer: &TextBuffer,
         _total_cols: usize,
         line_number_prefix: usize,
@@ -486,8 +486,8 @@ impl Renderer {
         let window_cols = window.col_end.saturating_sub(window.col_start);
         let content_width = window_cols.saturating_sub(line_number_prefix).max(1);
 
-        let cursor_line = state.cursor.line;
-        let cursor_col = state.cursor.col;
+        let cursor_line = window.cursor.line;
+        let cursor_col = window.cursor.col;
 
         // ── Count visual rows consumed by lines before the cursor line ──
         let start_line = window.scroll_top.max(1);
