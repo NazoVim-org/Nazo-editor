@@ -32,6 +32,11 @@ pub struct Editor {
     pub running: bool,
     pub(crate) needs_render: bool,
     pub config: Config,
+    /// Last modification count when auto-scroll was computed.
+    /// Used to skip wrapped_rows computation when nothing changed.
+    last_scroll_mod_count: usize,
+    /// Cached cursor line used to skip auto-scroll on identical state.
+    last_scroll_cursor_line: usize,
 }
 
 impl Editor {
@@ -84,6 +89,8 @@ impl Editor {
             running: false,
             needs_render: true,
             config: cfg,
+            last_scroll_mod_count: 0,
+            last_scroll_cursor_line: 0,
         }
     }
 
@@ -213,64 +220,70 @@ impl Editor {
             }
 
             // ── Sync window cursor + auto-scroll ──
-            if let Some(w) = self.engine.window_layout.windows.first_mut() {
-                // Sync so rendering (line highlight, cursor position) is consistent.
-                w.cursor = self.engine.state.cursor;
+            let mod_count = self.engine.buffer.modification_count();
+            let cursor_line = self.engine.state.cursor.line;
+            // Skip expensive wrapped_rows computation when nothing changed.
+            if self.needs_render
+                || mod_count != self.last_scroll_mod_count
+                || cursor_line != self.last_scroll_cursor_line
+            {
+                self.last_scroll_mod_count = mod_count;
+                self.last_scroll_cursor_line = cursor_line;
 
-                // Auto-scroll: keep cursor visible.
-                let show_num =
-                    self.engine.state.show_line_numbers || self.engine.state.show_relative_numbers;
-                let line_num_width = if show_num {
-                    self.engine.buffer.line_count().max(1).to_string().len()
-                } else {
-                    0
-                };
-                let line_num_prefix = if show_num { line_num_width + 2 } else { 0 };
-                let window_rows = w.row_end.saturating_sub(w.row_start);
-                let window_cols = w.col_end.saturating_sub(w.col_start);
-                let content_width = window_cols.saturating_sub(line_num_prefix).max(1);
+                if let Some(w) = self.engine.window_layout.windows.first_mut() {
+                    // Sync so rendering (line highlight, cursor position) is consistent.
+                    w.cursor = self.engine.state.cursor;
 
-                let cursor_line = w.cursor.line;
-                let cursor_col = w.cursor.col;
-                let total_lines = self.engine.buffer.line_count();
+                    // Auto-scroll: keep cursor visible.
+                    let show_num = self.engine.state.show_line_numbers
+                        || self.engine.state.show_relative_numbers;
+                    let line_num_width = if show_num {
+                        self.engine.buffer.line_count().max(1).to_string().len()
+                    } else {
+                        0
+                    };
+                    let line_num_prefix = if show_num { line_num_width + 2 } else { 0 };
+                    let window_rows = w.row_end.saturating_sub(w.row_start);
+                    let window_cols = w.col_end.saturating_sub(w.col_start);
+                    let content_width = window_cols.saturating_sub(line_num_prefix).max(1);
 
-                let mut visual_offset = 0usize;
-                let end_scan = cursor_line.min(total_lines);
-                for line_num in w.scroll_top.max(1)..end_scan {
-                    let line_text = self.engine.buffer.get_line(line_num);
-                    visual_offset = visual_offset.saturating_add(crate::renderer::wrapped_rows(
-                        &line_text,
-                        content_width,
-                        true,
-                    ));
-                }
-                if cursor_line >= w.scroll_top && cursor_line <= total_lines {
-                    let line_text = self.engine.buffer.get_line(cursor_line);
-                    let nchars = line_text.chars().count();
-                    let nsegs = nchars.div_ceil(content_width).max(1);
-                    let seg = (cursor_col / content_width).min(nsegs.saturating_sub(1));
-                    visual_offset = visual_offset.saturating_add(seg);
-                }
+                    let cursor_col = w.cursor.col;
+                    let total_lines = self.engine.buffer.line_count();
 
-                let margin = (window_rows / 3).max(1);
-
-                if cursor_line < w.scroll_top {
-                    w.scroll_top = cursor_line.saturating_sub(margin).max(1);
-                    self.needs_render = true;
-                } else if visual_offset >= window_rows.saturating_sub(1) {
-                    let mut new_scroll = cursor_line;
-                    let mut rows_needed = margin;
-                    while new_scroll > 1 && rows_needed > 0 {
-                        new_scroll -= 1;
-                        let t = self.engine.buffer.get_line(new_scroll);
-                        rows_needed = rows_needed.saturating_sub(crate::renderer::wrapped_rows(
-                            &t,
-                            content_width,
-                            true,
-                        ));
+                    let mut visual_offset = 0usize;
+                    let end_scan = cursor_line.min(total_lines);
+                    for line_num in w.scroll_top.max(1)..end_scan {
+                        let line_text = self.engine.buffer.get_line(line_num);
+                        visual_offset = visual_offset.saturating_add(
+                            crate::renderer::wrapped_rows(&line_text, content_width, true),
+                        );
                     }
-                    w.scroll_top = new_scroll.max(1);
-                    self.needs_render = true;
+                    if cursor_line >= w.scroll_top && cursor_line <= total_lines {
+                        let line_text = self.engine.buffer.get_line(cursor_line);
+                        let nchars = line_text.chars().count();
+                        let nsegs = nchars.div_ceil(content_width).max(1);
+                        let seg = (cursor_col / content_width).min(nsegs.saturating_sub(1));
+                        visual_offset = visual_offset.saturating_add(seg);
+                    }
+
+                    let margin = (window_rows / 3).max(1);
+
+                    if cursor_line < w.scroll_top {
+                        w.scroll_top = cursor_line.saturating_sub(margin).max(1);
+                        self.needs_render = true;
+                    } else if visual_offset >= window_rows.saturating_sub(1) {
+                        let mut new_scroll = cursor_line;
+                        let mut rows_needed = margin;
+                        while new_scroll > 1 && rows_needed > 0 {
+                            new_scroll -= 1;
+                            let t = self.engine.buffer.get_line(new_scroll);
+                            rows_needed = rows_needed.saturating_sub(
+                                crate::renderer::wrapped_rows(&t, content_width, true),
+                            );
+                        }
+                        w.scroll_top = new_scroll.max(1);
+                        self.needs_render = true;
+                    }
                 }
             }
 
@@ -334,6 +347,64 @@ impl Editor {
     pub fn show_file_info(&mut self) {
         let result = self.engine.show_file_info();
         self.apply_result(result);
+    }
+
+    // ── Directory browsing (file browser) ──────────────────────────
+
+    /// Reset operator state and consume any pending count.
+    /// Called before every directory-browsing action to prevent stale
+    /// operator/count from leaking into the next buffer.
+    fn reset_dir_operator_state(&mut self) {
+        self.engine.operator_state.reset();
+        // Discard any count the user typed before the action.
+        let _ = self.engine.operator_state.count.take();
+    }
+
+    /// Open the directory entry under the cursor.
+    /// Directories navigate into them; files open as normal buffers.
+    fn open_selected_entry(&mut self) {
+        self.reset_dir_operator_state();
+        let line = self.engine.state.cursor.line;
+        if let Some(entry) = self.engine.buffer.selected_entry(line) {
+            let path = entry.path.to_string_lossy().to_string();
+            if entry.is_dir {
+                if let Err(e) = self.engine.buffer_open_dir(&path) {
+                    self.engine.state.push_message(MessageLevel::Error, e);
+                }
+            } else if let Err(e) = self.engine.buffer_open(&path) {
+                self.engine.state.push_message(MessageLevel::Error, e);
+            }
+            self.needs_render = true;
+        }
+    }
+
+    /// Navigate to the parent directory.
+    fn go_up_directory(&mut self) {
+        self.reset_dir_operator_state();
+        if let Some(dir_path) = self.engine.buffer.dir_path().map(|p| p.to_path_buf()) {
+            if let Some(parent) = dir_path.parent() {
+                let path = parent.to_string_lossy().to_string();
+                if path.is_empty() {
+                    return;
+                }
+                if let Err(e) = self.engine.buffer_open_dir(&path) {
+                    self.engine.state.push_message(MessageLevel::Error, e);
+                }
+                self.needs_render = true;
+            }
+        }
+    }
+
+    /// Refresh (re-read) the current directory listing.
+    fn refresh_directory(&mut self) {
+        self.reset_dir_operator_state();
+        if let Some(dir_path) = self.engine.buffer.dir_path().map(|p| p.to_path_buf()) {
+            let path = dir_path.to_string_lossy().to_string();
+            if let Err(e) = self.engine.buffer_open_dir(&path) {
+                self.engine.state.push_message(MessageLevel::Error, e);
+            }
+            self.needs_render = true;
+        }
     }
 
     pub async fn save_file_async(&mut self) {
@@ -428,6 +499,8 @@ mod tests {
             running: true,
             needs_render: false,
             config: Config::default(),
+            last_scroll_mod_count: 0,
+            last_scroll_cursor_line: 0,
         }
     }
 

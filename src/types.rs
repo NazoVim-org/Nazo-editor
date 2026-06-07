@@ -530,6 +530,17 @@ impl Default for EditorState {
     }
 }
 
+/// A single entry in a directory listing buffer.
+#[derive(Debug, Clone)]
+pub struct DirEntry {
+    /// Display name (e.g. "dir_name/" for directories).
+    pub name: String,
+    /// Absolute path of the entry.
+    pub path: PathBuf,
+    /// True if this entry is a directory.
+    pub is_dir: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum PluginEvent {
     ModeChange {
