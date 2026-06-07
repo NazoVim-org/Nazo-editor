@@ -218,7 +218,7 @@ impl Renderer {
             let styled_chars = build_styled_chars(&raw_line, line_highlights);
             let segments = wrap_styled(&styled_chars, content_width, true); // Always wrap in windows
 
-            for (_seg_idx, segment) in segments.iter().enumerate() {
+            for segment in segments.iter() {
                 if screen_rows_used >= window_rows {
                     break;
                 }
