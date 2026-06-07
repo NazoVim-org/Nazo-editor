@@ -1,4 +1,4 @@
-use crate::types::{DirEntry, IjevimError, Result};
+use crate::types::{IjevimError, Result};
 use ropey::Rope;
 use std::path::{Path, PathBuf};
 
@@ -10,10 +10,6 @@ pub struct TextBuffer {
     dirty: bool,
     modification_count: usize,
     pub(crate) saved_modification_count: usize,
-    /// If set, this buffer shows a directory listing (file browser).
-    dir_path: Option<PathBuf>,
-    /// Cached directory entries for navigation. Index i corresponds to line i+1.
-    dir_entries: Vec<DirEntry>,
 }
 
 impl TextBuffer {
@@ -24,8 +20,6 @@ impl TextBuffer {
             dirty: false,
             modification_count: 0,
             saved_modification_count: 0,
-            dir_path: None,
-            dir_entries: Vec::new(),
         }
     }
 
@@ -36,8 +30,6 @@ impl TextBuffer {
             dirty: false,
             modification_count: 0,
             saved_modification_count: 0,
-            dir_path: None,
-            dir_entries: Vec::new(),
         }
     }
 
@@ -59,16 +51,6 @@ impl TextBuffer {
             return 0;
         }
         self.doc.line(line_number - 1).chars().count()
-    }
-
-    /// Return the characters of a line as a `Vec<char>`.
-    /// Use this instead of `get_line(n).chars().collect()` to avoid an
-    /// intermediate `String` allocation — `RopeSlice` yields chars directly.
-    pub fn line_chars(&self, line_number: usize) -> Vec<char> {
-        if line_number < 1 || line_number > self.line_count() {
-            return Vec::new();
-        }
-        self.doc.line(line_number - 1).chars().collect()
     }
 
     pub fn insert(&mut self, line: usize, col: usize, text: &str) {
@@ -248,36 +230,6 @@ impl TextBuffer {
         self.file_path = path;
     }
 
-    /// Returns `true` if this buffer contains a directory listing (file browser).
-    pub fn is_directory_listing(&self) -> bool {
-        self.dir_path.is_some()
-    }
-
-    /// Returns the directory path if this is a directory listing buffer.
-    pub fn dir_path(&self) -> Option<&Path> {
-        self.dir_path.as_deref()
-    }
-
-    /// Returns the cached directory entries for navigation.
-    /// Entry at index `i` corresponds to buffer line `i + 1`.
-    pub fn dir_entries(&self) -> &[DirEntry] {
-        &self.dir_entries
-    }
-
-    /// Return the directory entry at the given buffer line (1-indexed).
-    pub fn selected_entry(&self, line: usize) -> Option<&DirEntry> {
-        if line < 1 || line > self.dir_entries.len() {
-            return None;
-        }
-        self.dir_entries.get(line - 1)
-    }
-
-    /// Mark this buffer as a directory listing with the given entries and path.
-    pub fn set_dir_listing(&mut self, entries: Vec<DirEntry>, path: PathBuf) {
-        self.dir_entries = entries;
-        self.dir_path = Some(path);
-    }
-
     /// Single point of truth for marking the buffer as modified. All mutation
     /// methods funnel through this helper to keep `dirty` and
     /// `modification_count` in lock-step.
@@ -301,10 +253,12 @@ impl TextBuffer {
     }
 
     pub fn get_word_at(&self, line: usize, col: usize) -> (String, usize, usize) {
-        if line < 1 || line > self.line_count() {
+        let line_idx = line.saturating_sub(1);
+        if line_idx >= self.doc.len_lines() {
             return (String::new(), 0, 0);
         }
-        let chars: Vec<char> = self.line_chars(line);
+        let line_str = self.doc.line(line_idx).to_string();
+        let chars: Vec<char> = line_str.chars().collect();
 
         if col >= chars.len() {
             return (String::new(), col, col);
@@ -332,7 +286,29 @@ impl TextBuffer {
     /// A WORD is a sequence of non-whitespace characters (Vim's `W`/`B`).
     /// Returns (word_text, start_col, end_col).
     pub fn get_word_range_upper(&self, line: usize, col: usize) -> (String, usize, usize) {
-        self.get_word_at(line, col)
+        let line_idx = line.saturating_sub(1);
+        if line_idx >= self.doc.len_lines() {
+            return (String::new(), 0, 0);
+        }
+        let line_str = self.doc.line(line_idx).to_string();
+        let chars: Vec<char> = line_str.chars().collect();
+
+        if col >= chars.len() {
+            return (String::new(), col, col);
+        }
+
+        let mut start = col;
+        while start > 0 && !chars[start - 1].is_whitespace() {
+            start -= 1;
+        }
+
+        let mut end = col;
+        while end < chars.len() && !chars[end].is_whitespace() {
+            end += 1;
+        }
+
+        let word: String = chars[start..end].iter().collect();
+        (word, start, end)
     }
 
     pub fn get_line_range(&self, start_line: usize, end_line: usize) -> String {
@@ -514,7 +490,8 @@ impl TextBuffer {
 
         let mut result = String::new();
         for line_num in s_line..=e_line {
-            let chars = self.line_chars(line_num);
+            let line = self.get_line(line_num);
+            let chars: Vec<char> = line.chars().collect();
             let end = e_col.min(chars.len());
             if s_col < end {
                 result.push_str(&chars[s_col..end].iter().collect::<String>());
@@ -553,7 +530,8 @@ impl TextBuffer {
         // we can process top-to-bottom safely because each line's
         // deletion is at the same col range within its own line.
         for line_num in s_line..=e_line {
-            let chars = self.line_chars(line_num);
+            let line = self.get_line(line_num);
+            let chars: Vec<char> = line.chars().collect();
             let end = e_col.min(chars.len());
             if s_col < end {
                 let line_content: String = chars[s_col..end].iter().collect();

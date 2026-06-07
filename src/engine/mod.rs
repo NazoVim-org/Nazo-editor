@@ -3,7 +3,7 @@ use crate::highlight::Style;
 use crate::plugin::PluginManager;
 use crate::register::Register;
 use crate::state::{CursorState, InsertState, OperatorState, SearchState};
-use crate::types::{ConfirmAction, DirEntry, DotAction, EditorState, KillRing, Mode, Position};
+use crate::types::{ConfirmAction, DotAction, EditorState, KillRing, Mode, Position};
 use crate::undo::UndoManager;
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::path::PathBuf;
@@ -332,72 +332,6 @@ impl Engine {
         );
         self.inactive_buffers.push(current);
         self.state.file_path = Some(p);
-        self.state.cursor = Position { line: 1, col: 0 };
-        self.state.dirty = false;
-        Ok(())
-    }
-
-    /// Open a directory listing in a new buffer (`:e <dir>` / `:Ex`).
-    pub fn buffer_open_dir(&mut self, path: &str) -> Result<(), String> {
-        use std::path::Path;
-        let dir = Path::new(path).to_path_buf();
-
-        let read_dir = std::fs::read_dir(&dir)
-            .map_err(|e| format!("Cannot read directory '{}': {}", path, e))?;
-
-        let mut entries: Vec<DirEntry> = read_dir
-            .filter_map(|e| e.ok())
-            .map(|e| {
-                // Use metadata() which follows symlinks — a symlink to a
-                // directory should be treated as a directory entry.
-                let is_dir = e.metadata().map(|m| m.is_dir()).unwrap_or(false);
-                let name = if is_dir {
-                    format!("{}/", e.file_name().to_string_lossy())
-                } else {
-                    e.file_name().to_string_lossy().to_string()
-                };
-                DirEntry {
-                    name,
-                    path: e.path(),
-                    is_dir,
-                }
-            })
-            .collect();
-
-        // Sort: directories first, then files; alphabetically within each group.
-        entries.sort_by(|a, b| {
-            if a.is_dir != b.is_dir {
-                b.is_dir.cmp(&a.is_dir)
-            } else {
-                a.name.cmp(&b.name)
-            }
-        });
-
-        // Generate listing text (one line per entry, no trailing empty line).
-        let listing = entries
-            .iter()
-            .map(|e| e.name.as_str())
-            .collect::<Vec<&str>>()
-            .join("\n");
-
-        let mut new_buffer = TextBuffer::new();
-        new_buffer.set_dir_listing(entries, dir.clone());
-        if listing.is_empty() {
-            // Show a placeholder so the buffer isn't completely blank.
-            new_buffer.insert(1, 0, "(empty)");
-        } else {
-            new_buffer.insert(1, 0, &listing);
-        }
-
-        // Switch current buffer to inactive, open new one as active.
-        let current = (
-            std::mem::replace(&mut self.buffer, new_buffer),
-            std::mem::take(&mut self.undo_manager),
-            self.state.file_path.take(),
-            self.state.cursor,
-        );
-        self.inactive_buffers.push(current);
-        self.state.file_path = Some(dir);
         self.state.cursor = Position { line: 1, col: 0 };
         self.state.dirty = false;
         Ok(())
