@@ -6,6 +6,19 @@ use crate::types::{EditorState, MessageLevel, Mode, Window, WindowLayout};
 use crossterm::style::Color;
 use std::io;
 
+// ── Named colour constants ─────────────────────────────────────────────
+const LINE_NUMBER_FG: Color = Color::AnsiValue(240);
+const CURRENT_LINE_BG: Color = Color::AnsiValue(235);
+const STATUS_BAR_BG: Color = Color::AnsiValue(236);
+const STATUS_INFO_BG: Color = Color::AnsiValue(21);
+const STATUS_WARN_BG: Color = Color::AnsiValue(226);
+const CURSOR_FG: Color = Color::Black;
+const CURSOR_BG: Color = Color::White;
+const STATUS_ERROR_BG: Color = Color::Red;
+const STATUS_ERROR_FG: Color = Color::White;
+/// Colour for directory entries in a directory listing buffer.
+const DIR_ENTRY_FG: Color = Color::AnsiValue(81);
+
 /// Render context for a single window.
 struct WindowRenderContext<'a> {
     window: &'a Window,
@@ -23,13 +36,9 @@ struct WindowRenderContext<'a> {
 }
 
 /// One visual (display) row produced from wrapping a buffer line.
-#[allow(dead_code)]
 struct VisualLine {
     /// Buffer line number (1-indexed).
     buffer_line: usize,
-    /// Starting buffer column of this visual segment.
-    #[allow(dead_code)]
-    segment_start_col: usize,
     /// Styled characters to display on this screen row.
     styled_chars: Vec<(char, CellStyle)>,
 }
@@ -209,13 +218,12 @@ impl Renderer {
             let styled_chars = build_styled_chars(&raw_line, line_highlights);
             let segments = wrap_styled(&styled_chars, content_width, true); // Always wrap in windows
 
-            for (seg_idx, segment) in segments.iter().enumerate() {
+            for (_seg_idx, segment) in segments.iter().enumerate() {
                 if screen_rows_used >= window_rows {
                     break;
                 }
                 visual_lines.push(VisualLine {
                     buffer_line: buf_line,
-                    segment_start_col: seg_idx * content_width,
                     styled_chars: segment.clone(),
                 });
                 screen_rows_used += 1;
@@ -225,7 +233,7 @@ impl Renderer {
 
         // Render content rows into screen buffer
         let gray_style = CellStyle {
-            fg: Color::AnsiValue(240),
+            fg: LINE_NUMBER_FG,
             ..CellStyle::default()
         };
 
@@ -263,13 +271,21 @@ impl Renderer {
             }
 
             // Content
+            let is_dir_line = buffer.is_directory_listing()
+                && buffer
+                    .selected_entry(vline.buffer_line)
+                    .is_some_and(|e| e.is_dir);
             for (col, (ch, style)) in vline.styled_chars.iter().enumerate() {
                 let target_col = window.col_start + line_number_prefix + col;
                 if target_col < window.col_end && target_col < total_cols {
                     let mut cell_style = *style;
                     // Highlight current line in focused window
                     if vline.buffer_line == self.get_focused_cursor_line(window) {
-                        cell_style.bg = Color::AnsiValue(235);
+                        cell_style.bg = CURRENT_LINE_BG;
+                    }
+                    // Directory entries in file browser are shown in a distinct colour
+                    if is_dir_line {
+                        cell_style.fg = DIR_ENTRY_FG;
                     }
                     self.screen
                         .set_cell(target_row, target_col, *ch, cell_style);
@@ -376,19 +392,19 @@ impl Renderer {
                 .unwrap_or(MessageLevel::Info);
             match level {
                 MessageLevel::Error => CellStyle {
-                    bg: Color::Red,
-                    fg: Color::White,
+                    bg: STATUS_ERROR_BG,
+                    fg: STATUS_ERROR_FG,
                     bold: true,
                     ..CellStyle::default()
                 },
                 MessageLevel::Warning => CellStyle {
-                    bg: Color::AnsiValue(226),
+                    bg: STATUS_WARN_BG,
                     fg: Color::Black,
                     bold: true,
                     ..CellStyle::default()
                 },
                 MessageLevel::Info => CellStyle {
-                    bg: Color::AnsiValue(21),
+                    bg: STATUS_INFO_BG,
                     fg: Color::White,
                     bold: true,
                     ..CellStyle::default()
@@ -396,7 +412,7 @@ impl Renderer {
             }
         } else {
             CellStyle {
-                bg: Color::AnsiValue(236),
+                bg: STATUS_BAR_BG,
                 fg: Color::White,
                 ..CellStyle::default()
             }
@@ -533,8 +549,8 @@ impl Renderer {
             col,
             ' ',
             CellStyle {
-                fg: Color::Black,
-                bg: Color::White,
+                fg: CURSOR_FG,
+                bg: CURSOR_BG,
                 ..CellStyle::default()
             },
         );

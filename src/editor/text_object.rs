@@ -363,7 +363,7 @@ impl Editor {
         let mut open_pos: Option<usize> = None;
         let mut open_line = self.engine.state.cursor.line;
         for l in (1..=self.engine.state.cursor.line).rev() {
-            let l_chars: Vec<char> = self.engine.buffer.get_line(l).chars().collect();
+            let l_chars: Vec<char> = self.engine.buffer.line_chars(l);
             for i in (0..l_chars.len()).rev() {
                 if l == self.engine.state.cursor.line && i >= col {
                     continue;
@@ -382,7 +382,7 @@ impl Editor {
         let mut close_pos: Option<usize> = None;
         let mut close_line = self.engine.state.cursor.line;
         for l in self.engine.state.cursor.line..=self.engine.buffer.line_count() {
-            let l_chars: Vec<char> = self.engine.buffer.get_line(l).chars().collect();
+            let l_chars: Vec<char> = self.engine.buffer.line_chars(l);
             for (i, &c) in l_chars.iter().enumerate() {
                 if l == self.engine.state.cursor.line && i <= col {
                     continue;
@@ -415,20 +415,17 @@ impl Editor {
 
                 let mut content = String::new();
                 if open_line == close_line {
-                    let line_chars: Vec<char> =
-                        self.engine.buffer.get_line(open_line).chars().collect();
+                    let line_chars: Vec<char> = self.engine.buffer.line_chars(open_line);
                     content = line_chars[content_start..content_end].iter().collect();
                 } else {
-                    let open_chars: Vec<char> =
-                        self.engine.buffer.get_line(open_line).chars().collect();
+                    let open_chars: Vec<char> = self.engine.buffer.line_chars(open_line);
                     content.push_str(&open_chars[content_start..].iter().collect::<String>());
                     content.push('\n');
                     for l in (open_line + 1)..close_line {
                         content.push_str(&self.engine.buffer.get_line(l));
                         content.push('\n');
                     }
-                    let close_chars: Vec<char> =
-                        self.engine.buffer.get_line(close_line).chars().collect();
+                    let close_chars: Vec<char> = self.engine.buffer.line_chars(close_line);
                     content.push_str(&close_chars[..content_end].iter().collect::<String>());
                 }
 

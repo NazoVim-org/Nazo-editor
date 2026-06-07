@@ -61,6 +61,14 @@ impl Editor {
                         }
                         self.needs_render = true;
                     }
+                    "Ex" | "Explore" => {
+                        let cwd = std::env::current_dir().unwrap_or_default();
+                        let path = cwd.to_string_lossy().to_string();
+                        if let Err(e) = self.engine.buffer_open_dir(&path) {
+                            self.engine.state.push_message(MessageLevel::Error, e);
+                        }
+                        self.needs_render = true;
+                    }
                     "ls" | "buffers" => {
                         let list = self.engine.buffer_list();
                         self.engine.state.push_message(MessageLevel::Info, list);
@@ -98,9 +106,18 @@ impl Editor {
                             }
                         }
                     }
-                    cmd if cmd.starts_with("e ") => {
-                        let path = cmd.trim_start_matches("e ").trim();
-                        if let Err(e) = self.engine.buffer_open(path) {
+                    cmd if cmd.starts_with("e ") || cmd == "e." => {
+                        let path = if cmd == "e." {
+                            "."
+                        } else {
+                            cmd.trim_start_matches("e ").trim()
+                        };
+                        let p = std::path::Path::new(path);
+                        if p.is_dir() {
+                            if let Err(e) = self.engine.buffer_open_dir(path) {
+                                self.engine.state.push_message(MessageLevel::Error, e);
+                            }
+                        } else if let Err(e) = self.engine.buffer_open(path) {
                             self.engine.state.push_message(MessageLevel::Error, e);
                         }
                         self.needs_render = true;
@@ -442,18 +459,20 @@ impl Editor {
             };
             if new_line != line {
                 replacements += 1;
-                // Calculate how many chars were added/removed.
                 let old_chars = line.chars().count();
-                let _new_chars = new_line.chars().count();
                 let mod_count = self.engine.buffer.modification_count();
 
-                // Record the edit for undo.
                 use crate::undo::{Edit, EditType};
+                let old_trimmed = line.trim_end_matches('\n').to_string();
+                let new_trimmed = new_line.trim_end_matches('\n').to_string();
+
+                // Push a single Replace undo entry instead of Delete+Insert.
                 self.engine.undo_manager.push(Edit {
-                    edit_type: EditType::Delete {
+                    edit_type: EditType::Replace {
                         line: line_idx,
                         col: 0,
-                        text: line.trim_end_matches('\n').to_string(),
+                        old_text: old_trimmed.clone(),
+                        new_text: new_trimmed.clone(),
                     },
                     cursor_before: self.engine.state.cursor,
                     cursor_after: self.engine.state.cursor,
@@ -464,20 +483,7 @@ impl Editor {
                 let char_start = self.engine.buffer.line_to_char(line_idx - 1);
                 let char_end = char_start + old_chars;
                 self.engine.buffer.remove_range(char_start, char_end);
-                self.engine
-                    .buffer
-                    .insert(line_idx, 0, new_line.trim_end_matches('\n'));
-
-                self.engine.undo_manager.push(Edit {
-                    edit_type: EditType::Insert {
-                        line: line_idx,
-                        col: 0,
-                        text: new_line.trim_end_matches('\n').to_string(),
-                    },
-                    cursor_before: self.engine.state.cursor,
-                    cursor_after: self.engine.state.cursor,
-                    modification_count: mod_count + 1,
-                });
+                self.engine.buffer.insert(line_idx, 0, &new_trimmed);
             }
         }
 

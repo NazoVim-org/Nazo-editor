@@ -27,6 +27,27 @@ impl Editor {
             }
         }
 
+        // ── Directory listing (file browser) handling ────────────────
+        // When the current buffer is a directory listing, intercept
+        // Enter (open), '-' (parent dir), and 'R' (refresh).
+        if self.engine.buffer.is_directory_listing() {
+            match key {
+                KeyCode::Enter => {
+                    self.open_selected_entry().await;
+                    return;
+                }
+                KeyCode::Char('-') => {
+                    self.go_up_directory().await;
+                    return;
+                }
+                KeyCode::Char('R') => {
+                    self.refresh_directory();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         // Resolve 3-key operator sequences (e.g., diw, da(, ciw)
         // and 2-key operator + motion sequences (e.g., dd, fw).
         // Single `replace` to avoid consuming operator state on text-object mismatch.
