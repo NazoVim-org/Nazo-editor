@@ -283,6 +283,8 @@ pub enum Keymap {
     #[default]
     Vim,
     Emacs,
+    /// Review mode — temporary overlay for code review workflows.
+    Review,
 }
 
 impl std::fmt::Display for Keymap {
@@ -290,6 +292,7 @@ impl std::fmt::Display for Keymap {
         match self {
             Keymap::Vim => write!(f, "vim"),
             Keymap::Emacs => write!(f, "emacs"),
+            Keymap::Review => write!(f, "review"),
         }
     }
 }

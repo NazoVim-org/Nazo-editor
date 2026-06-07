@@ -81,6 +81,14 @@ assets = [
     { source = "pkg/ivim.svg", dest = "/usr/share/icons/hicolor/scalable/apps/", mode = "644" },
 ]
 
+[profile.dev]
+# Line tables only — no full debug info. Saves ~30% compile time.
+debug = 1
+# Ensure incremental compilation is on (default, but be explicit).
+incremental = true
+# Keep codegen-units high for parallel backend work (default).
+codegen-units = 256
+
 [profile.release]
 lto = true
 codegen-units = 1
