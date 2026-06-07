@@ -230,10 +230,15 @@ impl Editor {
                 self.last_scroll_mod_count = mod_count;
                 self.last_scroll_cursor_line = cursor_line;
 
-                if let Some(w) = self.engine.window_layout.windows.first_mut() {
-                    // Sync so rendering (line highlight, cursor position) is consistent.
-                    w.cursor = self.engine.state.cursor;
+                // Sync cursor for ALL windows, but only auto-scroll the focused one.
+                let focused_idx = self.engine.window_layout.focused;
+                for (i, w) in self.engine.window_layout.windows.iter_mut().enumerate() {
+                    if i == focused_idx {
+                        w.cursor = self.engine.state.cursor;
+                    }
+                }
 
+                if let Some(w) = self.engine.window_layout.windows.get_mut(focused_idx) {
                     // Auto-scroll: keep cursor visible.
                     let show_num = self.engine.state.show_line_numbers
                         || self.engine.state.show_relative_numbers;
@@ -246,6 +251,7 @@ impl Editor {
                     let window_rows = w.row_end.saturating_sub(w.row_start);
                     let window_cols = w.col_end.saturating_sub(w.col_start);
                     let content_width = window_cols.saturating_sub(line_num_prefix).max(1);
+                    let tabstop = self.engine.state.tabstop;
 
                     let cursor_col = w.cursor.col;
                     let total_lines = self.engine.buffer.line_count();
@@ -255,7 +261,7 @@ impl Editor {
                     for line_num in w.scroll_top.max(1)..end_scan {
                         let line_text = self.engine.buffer.get_line(line_num);
                         visual_offset = visual_offset.saturating_add(
-                            crate::renderer::wrapped_rows(&line_text, content_width, true),
+                            crate::renderer::wrapped_rows(&line_text, content_width, true, tabstop),
                         );
                     }
                     if cursor_line >= w.scroll_top && cursor_line <= total_lines {
@@ -266,7 +272,13 @@ impl Editor {
                         visual_offset = visual_offset.saturating_add(seg);
                     }
 
-                    let margin = (window_rows / 3).max(1);
+                    // Use configured scrolloff, with a minimum of 1 to keep 1 line visible.
+                    let scrolloff = self.engine.state.scrolloff;
+                    let margin = if scrolloff > 0 {
+                        scrolloff.min(window_rows.saturating_sub(1) / 2)
+                    } else {
+                        (window_rows / 3).max(1)
+                    };
 
                     if cursor_line < w.scroll_top {
                         w.scroll_top = cursor_line.saturating_sub(margin).max(1);
@@ -278,7 +290,7 @@ impl Editor {
                             new_scroll -= 1;
                             let t = self.engine.buffer.get_line(new_scroll);
                             rows_needed = rows_needed.saturating_sub(
-                                crate::renderer::wrapped_rows(&t, content_width, true),
+                                crate::renderer::wrapped_rows(&t, content_width, true, tabstop),
                             );
                         }
                         w.scroll_top = new_scroll.max(1);

@@ -42,6 +42,7 @@ tokio = { version = "1", features = ["rt", "macros", "fs"] }
 thiserror = "2"
 toml = "0.8"
 regex = "1"
+unicode-width = "0.2"
 
 # Optional, feature-gated.
 syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy", "default-syntaxes", "default-themes"], optional = true }
