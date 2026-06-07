@@ -2,6 +2,7 @@
 name = "ijevim"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.74"
 description = "A minimal Vim-like TUI editor written in Rust"
 authors = ["NazoVim-org"]
 license = "MIT"
