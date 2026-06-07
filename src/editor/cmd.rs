@@ -62,10 +62,19 @@ impl Editor {
                         self.needs_render = true;
                     }
                     "Ex" | "Explore" => {
-                        let cwd = std::env::current_dir().unwrap_or_default();
-                        let path = cwd.to_string_lossy().to_string();
-                        if let Err(e) = self.engine.buffer_open_dir(&path) {
-                            self.engine.state.push_message(MessageLevel::Error, e);
+                        match std::env::current_dir() {
+                            Ok(cwd) => {
+                                let path = cwd.to_string_lossy().to_string();
+                                if let Err(e) = self.engine.buffer_open_dir(&path) {
+                                    self.engine.state.push_message(MessageLevel::Error, e);
+                                }
+                            }
+                            Err(e) => {
+                                self.engine.state.push_message(
+                                    MessageLevel::Error,
+                                    format!("Cannot get current directory: {}", e),
+                                );
+                            }
                         }
                         self.needs_render = true;
                     }
@@ -501,6 +510,11 @@ impl Editor {
     }
 
     async fn reload_file(&mut self) {
+        // Directory listings cannot be reloaded as text files — refresh instead.
+        if self.engine.buffer.is_directory_listing() {
+            self.refresh_directory();
+            return;
+        }
         if let Some(path) = &self.engine.state.file_path {
             match crate::buffer::TextBuffer::load_file(path.to_str().unwrap_or("")).await {
                 Ok(buf) => {

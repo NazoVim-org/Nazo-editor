@@ -33,11 +33,11 @@ impl Editor {
         if self.engine.buffer.is_directory_listing() {
             match key {
                 KeyCode::Enter => {
-                    self.open_selected_entry().await;
+                    self.open_selected_entry();
                     return;
                 }
                 KeyCode::Char('-') => {
-                    self.go_up_directory().await;
+                    self.go_up_directory();
                     return;
                 }
                 KeyCode::Char('R') => {

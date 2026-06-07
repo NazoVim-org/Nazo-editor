@@ -348,7 +348,9 @@ impl Engine {
         let mut entries: Vec<DirEntry> = read_dir
             .filter_map(|e| e.ok())
             .map(|e| {
-                let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                // Use metadata() which follows symlinks — a symlink to a
+                // directory should be treated as a directory entry.
+                let is_dir = e.metadata().map(|m| m.is_dir()).unwrap_or(false);
                 let name = if is_dir {
                     format!("{}/", e.file_name().to_string_lossy())
                 } else {
@@ -371,16 +373,19 @@ impl Engine {
             }
         });
 
-        // Generate listing text.
-        let mut listing = String::new();
-        for entry in &entries {
-            listing.push_str(&entry.name);
-            listing.push('\n');
-        }
+        // Generate listing text (one line per entry, no trailing empty line).
+        let listing = entries
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect::<Vec<&str>>()
+            .join("\n");
 
         let mut new_buffer = TextBuffer::new();
         new_buffer.set_dir_listing(entries, dir.clone());
-        if !listing.is_empty() {
+        if listing.is_empty() {
+            // Show a placeholder so the buffer isn't completely blank.
+            new_buffer.insert(1, 0, "(empty)");
+        } else {
             new_buffer.insert(1, 0, &listing);
         }
 
