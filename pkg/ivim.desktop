@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=ivim
+Comment=A minimal Vim-like TUI editor written in Rust
+Exec=ivim %F
+Icon=ivim
+Terminal=true
+Type=Application
+Categories=Development;TextEditor;
+StartupNotify=true
+MimeType=text/plain;

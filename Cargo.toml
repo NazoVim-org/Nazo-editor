@@ -60,6 +60,27 @@ tempfile = "3.8"
 name = "editor_bench"
 harness = false
 
+# ── Packaging metadata (used by cargo-deb, cargo-generate-rpm, etc.) ──
+
+[package.metadata.deb]
+maintainer = "NazoVim-org <https://github.com/NazoVim-org/ijeivm>"
+depends = ""
+extended-description = "A minimal Vim-like TUI editor written in Rust."
+section = "editors"
+priority = "optional"
+assets = [
+    ["target/release/ivim", "usr/bin/", "755"],
+    ["pkg/ivim.desktop", "usr/share/applications/", "644"],
+    ["pkg/ivim.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/ivim", dest = "/usr/bin/", mode = "755" },
+    { source = "pkg/ivim.desktop", dest = "/usr/share/applications/", mode = "644" },
+    { source = "pkg/ivim.svg", dest = "/usr/share/icons/hicolor/scalable/apps/", mode = "644" },
+]
+
 [profile.release]
 lto = true
 codegen-units = 1

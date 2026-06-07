@@ -1,31 +1,58 @@
+# ijevim release pipeline
+#
+# Triggered by git tags matching v* (e.g. v0.1.0).
+# Builds for Linux / macOS / Windows, then produces every major package format:
+#
+#   Linux   – tar.gz, tar.xz, .deb, .rpm, AppImage
+#   macOS   – tar.gz, tar.xz, .dmg  (x86_64 + arm64)
+#   Windows – .zip, .msi
+#
+# Also generates checksums.txt, a Homebrew formula (ivim.rb),
+# and an Arch Linux PKGBUILD.
+
 name: Release
 
 on:
   push:
     tags: ['v*']
 
+env:
+  CARGO_TERM_COLOR: always
+
 permissions:
   contents: write
 
+# ──────────────────────────────────────────────────────────────────
+# Jobs
+# ──────────────────────────────────────────────────────────────────
+
 jobs:
+  # ── Version ────────────────────────────────────────────────────
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+  # ── Build native binaries ──────────────────────────────────────
   build:
-    name: Build ${{ matrix.target }}
+    name: Build (${{ matrix.target }})
+    needs: [version]
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            binary: ivim-linux-amd64
           - target: x86_64-apple-darwin
             os: macos-latest
-            binary: ivim-macos-amd64
           - target: aarch64-apple-darwin
             os: macos-latest
-            binary: ivim-macos-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            binary: ivim-windows-amd64.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -34,37 +61,375 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --target ${{ matrix.target }}
-      - name: Rename binary
-        shell: bash
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/ivim${{ runner.os == 'Windows' && '.exe' || '' }}
+          if-no-files-found: error
+
+  # ══════════════════════════════════════════════════════════════
+  #  Linux packages
+  # ══════════════════════════════════════════════════════════════
+  package-linux:
+    name: Linux (${{ matrix.format }})
+    needs: [build, version]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        format: [deb, rpm, appimage, tar-gz, tar-xz]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-x86_64-unknown-linux-gnu
+          path: target/release/
+      - run: chmod +x target/release/ivim
+
+      - name: Version
+        id: ver
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - run: mkdir -p dist archive
+
+      # ── tar.gz ──────────────────────────────────────────────────
+      - name: tar.gz
+        if: matrix.format == 'tar-gz'
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "target/${{ matrix.target }}/release/ivim.exe" "${{ matrix.binary }}"
-          else
-            cp "target/${{ matrix.target }}/release/ivim" "${{ matrix.binary }}"
-          fi
+          mkdir -p "archive/ivim-${{ steps.ver.outputs.VERSION }}-x86_64-linux"
+          cp target/release/ivim "$_"
+          tar czf "dist/ivim-${{ steps.ver.outputs.VERSION }}-x86_64-linux.tar.gz" \
+            -C archive "ivim-${{ steps.ver.outputs.VERSION }}-x86_64-linux"
+
+      # ── tar.xz ──────────────────────────────────────────────────
+      - name: tar.xz
+        if: matrix.format == 'tar-xz'
+        run: |
+          mkdir -p "archive/ivim-${{ steps.ver.outputs.VERSION }}-x86_64-linux"
+          cp target/release/ivim "$_"
+          tar cJf "dist/ivim-${{ steps.ver.outputs.VERSION }}-x86_64-linux.tar.xz" \
+            -C archive "ivim-${{ steps.ver.outputs.VERSION }}-x86_64-linux"
+
+      # ── deb ────────────────────────────────────────────────────
+      - name: Install cargo-deb
+        if: matrix.format == 'deb'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+      - name: deb
+        if: matrix.format == 'deb'
+        run: |
+          cargo deb --no-build \
+            --deb-version "${{ steps.ver.outputs.VERSION }}" \
+            -o "dist/ivim_${{ steps.ver.outputs.VERSION }}_amd64.deb"
+
+      # ── rpm ────────────────────────────────────────────────────
+      - name: Install rpmbuild
+        if: matrix.format == 'rpm'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm
+      - name: Install cargo-generate-rpm
+        if: matrix.format == 'rpm'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-generate-rpm
+      - name: rpm
+        if: matrix.format == 'rpm'
+        run: |
+          cargo generate-rpm \
+            -o "dist/ivim-${{ steps.ver.outputs.VERSION }}-1.x86_64.rpm"
+
+      # ── AppImage ───────────────────────────────────────────────
+      - name: AppImage
+        if: matrix.format == 'appimage'
+        run: |
+          set -e
+          VERSION="${{ steps.ver.outputs.VERSION }}"
+
+          # Prepare AppDir
+          APPDIR=AppDir
+          mkdir -p "$APPDIR/usr/bin" \
+                   "$APPDIR/usr/share/applications" \
+                   "$APPDIR/usr/share/icons/hicolor/scalable/apps"
+          cp target/release/ivim        "$APPDIR/usr/bin/"
+          cp pkg/ivim.desktop          "$APPDIR/usr/share/applications/"
+          cp pkg/ivim.svg              "$APPDIR/usr/share/icons/hicolor/scalable/apps/"
+
+          # AppRun entry point
+          cat > "$APPDIR/AppRun" << 'EOF'
+          #!/bin/bash
+          exec "$APPDIR/usr/bin/ivim" "$@"
+          EOF
+          chmod +x "$APPDIR/AppRun"
+
+          # Download & extract appimagetool (FUSE not avail. in CI)
+          wget -q -O appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          ./appimagetool --appimage-extract > /dev/null 2>&1
+
+          # Build AppImage
+          ARCH=x86_64 ./squashfs-root/AppRun "$APPDIR" \
+            "dist/ivim-${VERSION}-x86_64.AppImage"
+
+      # ── Upload ─────────────────────────────────────────────────
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.binary }}
-          path: ${{ matrix.binary }}
+          name: pkg-${{ matrix.format }}-linux
+          path: dist/*
 
-  create-release:
+  # ══════════════════════════════════════════════════════════════
+  #  macOS packages  (x86_64 + arm64)
+  # ══════════════════════════════════════════════════════════════
+  package-macos:
+    name: macOS (${{ matrix.target }}, ${{ matrix.format }})
+    needs: [build, version]
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+        format: [tar-gz, tar-xz, dmg]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: binary/
+      - run: chmod +x binary/ivim
+
+      - name: Version
+        id: ver
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Arch suffix
+        id: arch
+        run: |
+          case "${{ matrix.target }}" in
+            x86_64-*)  echo "sfx=x86_64"  >> "$GITHUB_OUTPUT" ;;
+            aarch64-*) echo "sfx=arm64"   >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - run: mkdir -p dist archive
+
+      # ── tar.gz ──────────────────────────────────────────────────
+      - name: tar.gz
+        if: matrix.format == 'tar-gz'
+        run: |
+          mkdir -p "archive/ivim-${{ steps.ver.outputs.VERSION }}-${{ matrix.target }}"
+          cp binary/ivim "$_"
+          tar czf "dist/ivim-${{ steps.ver.outputs.VERSION }}-${{ matrix.target }}.tar.gz" \
+            -C archive "ivim-${{ steps.ver.outputs.VERSION }}-${{ matrix.target }}"
+
+      # ── tar.xz ──────────────────────────────────────────────────
+      - name: Install xz
+        if: matrix.format == 'tar-xz'
+        run: brew install xz
+      - name: tar.xz
+        if: matrix.format == 'tar-xz'
+        run: |
+          mkdir -p "archive/ivim-${{ steps.ver.outputs.VERSION }}-${{ matrix.target }}"
+          cp binary/ivim "$_"
+          tar cJf "dist/ivim-${{ steps.ver.outputs.VERSION }}-${{ matrix.target }}.tar.xz" \
+            -C archive "ivim-${{ steps.ver.outputs.VERSION }}-${{ matrix.target }}"
+
+      # ── DMG ─────────────────────────────────────────────────────
+      - name: DMG
+        if: matrix.format == 'dmg'
+        run: |
+          mkdir -p dmg
+          cp binary/ivim dmg/
+          hdiutil create \
+            -volname "ivim ${{ steps.ver.outputs.VERSION }}" \
+            -srcfolder dmg -ov -format UDZO \
+            "dist/ivim-${{ steps.ver.outputs.VERSION }}-${{ steps.arch.outputs.sfx }}.dmg"
+
+      # ── Upload ─────────────────────────────────────────────────
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.format }}-${{ matrix.target }}
+          path: dist/*
+
+  # ══════════════════════════════════════════════════════════════
+  #  Windows packages
+  # ══════════════════════════════════════════════════════════════
+  package-windows:
+    name: Windows (${{ matrix.format }})
+    needs: [build, version]
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        format: [zip, msi]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-x86_64-pc-windows-msvc
+          path: target/release/
+
+      - name: Version
+        id: ver
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - shell: bash
+        run: mkdir -p dist archive
+
+      # ── ZIP ─────────────────────────────────────────────────────
+      - name: ZIP
+        if: matrix.format == 'zip'
+        shell: bash
+        run: |
+          ARCHIVE="ivim-${{ steps.ver.outputs.VERSION }}-x86_64-pc-windows-msvc"
+          mkdir -p "archive/$ARCHIVE"
+          cp target/release/ivim.exe "archive/$ARCHIVE/"
+          7z a -tzip "dist/${ARCHIVE}.zip" "./archive/${ARCHIVE}/" > /dev/null
+
+      # ── MSI ─────────────────────────────────────────────────────
+      - name: Install cargo-wix
+        if: matrix.format == 'msi'
+        uses: taiki-e/install-action@v2
+        continue-on-error: true
+        with:
+          tool: cargo-wix
+      - name: MSI
+        if: matrix.format == 'msi'
+        continue-on-error: true
+        shell: bash
+        run: |
+          cargo wix --no-build -o "dist/ivim-${{ steps.ver.outputs.VERSION }}-x86_64.msi"
+
+      # ── Upload ─────────────────────────────────────────────────
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.format }}-windows
+          path: dist/*
+
+  # ══════════════════════════════════════════════════════════════
+  #  Release (collect all packages, checksums, formulas)
+  # ══════════════════════════════════════════════════════════════
+  release:
     name: Create Release
-    needs: [build]
+    needs:
+      - version
+      - package-linux
+      - package-macos
+      - package-windows
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Collect binaries
-        shell: bash
+
+      - name: Collect packages & compute checksums
         run: |
           mkdir -p release
           find artifacts -type f -exec cp {} release/ \;
-          ls -la release/
-      - uses: softprops/action-gh-release@v2
+          cd release
+          sha256sum * > checksums.txt
+          echo "── Artifacts ──"
+          ls -lh
+
+      - name: Generate Homebrew formula
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          cd release
+
+          # x86_64 macOS archive
+          X86_TGZ="ivim-${VERSION}-x86_64-apple-darwin.tar.gz"
+          X86_SHA=""
+          [ -f "$X86_TGZ" ] && X86_SHA=$(sha256sum "$X86_TGZ" | cut -d' ' -f1)
+
+          # arm64 macOS archive
+          ARM_TGZ="ivim-${VERSION}-aarch64-apple-darwin.tar.gz"
+          ARM_SHA=""
+          [ -f "$ARM_TGZ" ] && ARM_SHA=$(sha256sum "$ARM_TGZ" | cut -d' ' -f1)
+
+          # Linux x86_64 archive
+          LNX_TGZ="ivim-${VERSION}-x86_64-linux.tar.gz"
+          LNX_SHA=""
+          [ -f "$LNX_TGZ" ] && LNX_SHA=$(sha256sum "$LNX_TGZ" | cut -d' ' -f1)
+
+          cat > ../ivim.rb << RUBY
+          class Ivim < Formula
+            desc "A minimal Vim-like TUI editor written in Rust"
+            homepage "https://github.com/NazoVim-org/ijevim"
+            license "MIT"
+            version "$VERSION"
+
+            on_macos do
+              on_intel do
+                url "https://github.com/NazoVim-org/ijevim/releases/download/v${VERSION}/${X86_TGZ}"
+                sha256 "${X86_SHA}" if "${X86_SHA}" != ""
+              end
+              on_arm do
+                url "https://github.com/NazoVim-org/ijevim/releases/download/v${VERSION}/${ARM_TGZ}"
+                sha256 "${ARM_SHA}" if "${ARM_SHA}" != ""
+              end
+            end
+
+            on_linux do
+              url "https://github.com/NazoVim-org/ijevim/releases/download/v${VERSION}/${LNX_TGZ}"
+              sha256 "${LNX_SHA}" if "${LNX_SHA}" != ""
+            end
+
+            def install
+              bin.install "ivim"
+            end
+
+            test do
+              system "#{bin}/ivim", "--version"
+            end
+          end
+          RUBY
+          cp ../ivim.rb release/
+
+      - name: Generate Arch Linux PKGBUILD
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          cd release
+
+          LNX_TGZ="ivim-${VERSION}-x86_64-linux.tar.gz"
+          LNX_SHA=""
+          [ -f "$LNX_TGZ" ] && LNX_SHA=$(sha256sum "$LNX_TGZ" | cut -d' ' -f1)
+
+          cat > ../PKGBUILD << PKG
+          # Maintainer: NazoVim-org
+          pkgname=ivim
+          pkgver=${VERSION}
+          pkgrel=1
+          pkgdesc="A minimal Vim-like TUI editor written in Rust"
+          arch=('x86_64')
+          url="https://github.com/NazoVim-org/ijevim"
+          license=('MIT')
+          depends=()
+          source=("https://github.com/NazoVim-org/ijevim/releases/download/v\${pkgver}/${LNX_TGZ}")
+          sha256sums=('${LNX_SHA}')
+          package() {
+            install -Dm755 "ivim-\${pkgver}-x86_64-linux/ivim" "\${pkgdir}/usr/bin/ivim"
+          }
+          PKG
+          cp ../PKGBUILD release/
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
         with:
           files: release/*
           generate_release_notes: true
