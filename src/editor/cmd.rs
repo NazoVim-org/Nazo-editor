@@ -649,46 +649,35 @@ impl Editor {
 
     /// Run a git command and show its output in messages.
     pub(crate) fn handle_git_command(&mut self, args: &[&str]) {
-        match std::process::Command::new("git").args(args).output() {
-            Ok(output) => {
-                let cmd_str = args.join(" ");
-                if output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if stdout.is_empty() {
-                        self.engine
-                            .state
-                            .push_message(MessageLevel::Info, format!("git {}: OK", cmd_str));
-                    } else {
-                        // Show the full output; status line shows first line,
-                        // and `:messages` shows everything.
-                        self.engine
-                            .state
-                            .push_message(MessageLevel::Info, format!("git {}\n{}", cmd_str, stdout));
-                        // If the output has multiple branches, push the
-                        // compact summary too so the status line is useful.
-                        if stdout.lines().count() > 1 && args == ["branch"] {
-                            let branches: Vec<&str> = stdout
-                                .lines()
-                                .map(|l| l.trim_start_matches("* ").trim())
-                                .collect();
-                            self.engine.state.push_message(
-                                MessageLevel::Info,
-                                format!("Branches: {}", branches.join(", ")),
-                            );
-                        }
-                    }
+        let cmd_str = args.join(" ");
+        match crate::git::run(args) {
+            Ok(stdout) => {
+                if stdout.is_empty() {
+                    self.engine
+                        .state
+                        .push_message(MessageLevel::Info, format!("git {}: OK", cmd_str));
                 } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    self.engine.state.push_message(
-                        MessageLevel::Error,
-                        format!("git {} failed: {}", cmd_str, stderr),
-                    );
+                    self.engine
+                        .state
+                        .push_message(MessageLevel::Info, format!("git {}\n{}", cmd_str, stdout));
+                    // For branch listing, also push a compact summary.
+                    if stdout.lines().count() > 1 && args == ["branch"] {
+                        let branches: Vec<&str> = stdout
+                            .lines()
+                            .map(|l| l.trim_start_matches("* ").trim())
+                            .collect();
+                        self.engine.state.push_message(
+                            MessageLevel::Info,
+                            format!("Branches: {}", branches.join(", ")),
+                        );
+                    }
                 }
             }
-            Err(e) => {
-                self.engine
-                    .state
-                    .push_message(MessageLevel::Error, format!("Failed to run git: {}", e));
+            Err(stderr) => {
+                self.engine.state.push_message(
+                    MessageLevel::Error,
+                    format!("git {} failed: {}", cmd_str, stderr),
+                );
             }
         }
     }
@@ -704,8 +693,7 @@ impl Editor {
         if path.exists() {
             match std::fs::read_to_string(&path_str) {
                 Ok(content) => {
-                    self.engine.buffer =
-                        crate::buffer::TextBuffer::with_text(&content);
+                    self.engine.buffer = crate::buffer::TextBuffer::with_text(&content);
                     self.engine.state.file_path = Some(path.clone());
                     self.engine.state.dirty = false;
                     self.engine.state.push_message(
