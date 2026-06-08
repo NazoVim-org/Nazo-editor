@@ -151,6 +151,32 @@ impl Editor {
                             self.handle_write_path(cmd).await;
                         } else if cmd.starts_with("wq ") || cmd.starts_with("wq! ") {
                             self.handle_write_quit_path(cmd).await;
+                        } else if cmd == "branch" {
+                            self.handle_git_command(&["branch"]);
+                        } else if cmd.starts_with("branch ") {
+                            let args = cmd.trim_start_matches("branch ").trim();
+                            if args.starts_with("-d") || args.starts_with("-D") {
+                                let parts: Vec<&str> = args.splitn(2, ' ').collect();
+                                let flag = parts[0];
+                                let name = parts.get(1).unwrap_or(&"");
+                                self.handle_git_command(&["branch", flag, name]);
+                            } else if args == "-a" || args == "-r" {
+                                self.handle_git_command(&["branch", args]);
+                            } else {
+                                let branch_name = args;
+                                self.handle_git_command(&["checkout", branch_name]);
+                                self.reload_file_after_checkout();
+                            }
+                        } else if cmd.starts_with("git ") {
+                            let git_args_str = cmd.trim_start_matches("git ").trim();
+                            let git_args: Vec<&str> = git_args_str.split_whitespace().collect();
+                            if !git_args.is_empty() {
+                                self.handle_git_command(&git_args);
+                                // Reload file if switching branches
+                                if git_args.first() == Some(&"checkout") {
+                                    self.reload_file_after_checkout();
+                                }
+                            }
                         } else if cmd.starts_with("%s/") || cmd.starts_with("s/") {
                             self.handle_substitute(cmd);
                         } else {
@@ -618,6 +644,77 @@ impl Editor {
                     .state
                     .push_message(MessageLevel::Error, format!("Save failed: {}", e));
             }
+        }
+    }
+
+    /// Run a git command and show its output in messages.
+    pub(crate) fn handle_git_command(&mut self, args: &[&str]) {
+        let cmd_str = args.join(" ");
+        match crate::git::run(args) {
+            Ok(stdout) => {
+                if stdout.is_empty() {
+                    self.engine
+                        .state
+                        .push_message(MessageLevel::Info, format!("git {}: OK", cmd_str));
+                } else {
+                    self.engine
+                        .state
+                        .push_message(MessageLevel::Info, format!("git {}\n{}", cmd_str, stdout));
+                    // For branch listing, also push a compact summary.
+                    if stdout.lines().count() > 1 && args == ["branch"] {
+                        let branches: Vec<&str> = stdout
+                            .lines()
+                            .map(|l| l.trim_start_matches("* ").trim())
+                            .collect();
+                        self.engine.state.push_message(
+                            MessageLevel::Info,
+                            format!("Branches: {}", branches.join(", ")),
+                        );
+                    }
+                }
+            }
+            Err(stderr) => {
+                self.engine.state.push_message(
+                    MessageLevel::Error,
+                    format!("git {} failed: {}", cmd_str, stderr),
+                );
+            }
+        }
+    }
+
+    /// Reload the current file after a `git checkout` — file contents may have
+    /// changed (or the file may no longer exist).
+    fn reload_file_after_checkout(&mut self) {
+        self.needs_render = true;
+        let Some(path) = &self.engine.state.file_path.clone() else {
+            return;
+        };
+        let path_str = path.to_string_lossy().to_string();
+        if path.exists() {
+            match std::fs::read_to_string(&path_str) {
+                Ok(content) => {
+                    self.engine.buffer = crate::buffer::TextBuffer::with_text(&content);
+                    self.engine.state.file_path = Some(path.clone());
+                    self.engine.state.dirty = false;
+                    self.engine.state.push_message(
+                        MessageLevel::Info,
+                        format!("Reloaded after checkout: {}", path_str),
+                    );
+                }
+                Err(e) => {
+                    self.engine.state.push_message(
+                        MessageLevel::Warning,
+                        format!("Could not reload {}: {}", path_str, e),
+                    );
+                }
+            }
+        } else {
+            self.engine.buffer = crate::buffer::TextBuffer::new();
+            self.engine.state.file_path = None;
+            self.engine.state.push_message(
+                MessageLevel::Warning,
+                format!("File not found in this branch: {}", path_str),
+            );
         }
     }
 }

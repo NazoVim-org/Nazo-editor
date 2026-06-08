@@ -2,6 +2,7 @@ pub mod buffer;
 pub mod config;
 pub mod editor;
 pub(crate) mod engine;
+pub mod git;
 pub mod highlight;
 pub mod keymap;
 pub mod plugin;
