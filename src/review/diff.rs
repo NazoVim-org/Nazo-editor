@@ -99,6 +99,7 @@ fn run_working_tree_diff() -> Result<String, String> {
     combined.push_str(&String::from_utf8_lossy(&unstaged.stdout));
     Ok(combined)
 }
+
 // ── Unified diff parser ─────────────────────────────────────────────
 
 /// Parse a unified diff string into structured `DiffFile` entries.

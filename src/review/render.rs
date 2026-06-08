@@ -130,6 +130,32 @@ fn render_file_list(screen: &mut ScreenBuffer, review: &ReviewState, rect: Panel
         );
     }
 
+    // Empty state
+    if review.files.is_empty() {
+        let empty_row = rect.row_start + 2;
+        let msg = " No changes to review ";
+        let empty_style = CellStyle {
+            fg: DIM_FG,
+            ..CellStyle::default()
+        };
+        for (j, ch) in msg.chars().enumerate() {
+            if rect.col_start + j < rect.col_end {
+                screen.set_cell(empty_row, rect.col_start + j, ch, empty_style);
+            }
+        }
+        let hint = " :review --staged to see staged changes ";
+        let hint_style = CellStyle {
+            fg: Color::AnsiValue(240),
+            ..CellStyle::default()
+        };
+        for (j, ch) in hint.chars().enumerate() {
+            if rect.col_start + j < rect.col_end {
+                screen.set_cell(empty_row + 1, rect.col_start + j, ch, hint_style);
+            }
+        }
+        return;
+    }
+
     // File entries
     let max_visible = rect.height().saturating_sub(3); // title + sep + count
     for i in 0..review.files.len().min(max_visible) {
