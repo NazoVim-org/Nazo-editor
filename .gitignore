@@ -22,3 +22,5 @@ target/
 # OS
 .DS_Store
 Thumbs.db
+# Windows NTFS alternate data stream (checkout failure)
+:Zone.Identifier

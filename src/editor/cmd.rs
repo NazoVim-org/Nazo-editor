@@ -142,6 +142,11 @@ impl Editor {
                             self.handle_set_command(cmd);
                         } else if cmd == "nohlsearch" || cmd == "noh" {
                             self.engine.state.hlsearch = false;
+                        } else if cmd == "review" || cmd.starts_with("review ") {
+                            let args_str = cmd.trim_start_matches("review").trim();
+                            let args = crate::review::ReviewArgs::parse(args_str);
+                            self.enter_review_mode(args);
+                            self.needs_render = true;
                         } else if cmd.starts_with("w ") || cmd.starts_with("w! ") {
                             self.handle_write_path(cmd).await;
                         } else if cmd.starts_with("wq ") || cmd.starts_with("wq! ") {

@@ -2,6 +2,7 @@ use crate::buffer::TextBuffer;
 use crate::highlight::Style;
 use crate::plugin::PluginManager;
 use crate::register::Register;
+use crate::review::ReviewState;
 use crate::state::{CursorState, InsertState, OperatorState, SearchState};
 use crate::types::{ConfirmAction, DirEntry, DotAction, EditorState, KillRing, Mode, Position};
 use crate::undo::UndoManager;
@@ -70,6 +71,8 @@ pub struct Engine {
     pub(crate) last_highlight_mod_count: usize,
     pub(crate) highlights: Vec<Vec<(Style, String)>>,
     pub last_keypress_time: Instant,
+    /// Review mode state — `None` when not in review mode.
+    pub review_state: Option<ReviewState>,
 }
 
 impl Engine {
@@ -95,6 +98,7 @@ impl Engine {
             last_highlight_mod_count: 0,
             highlights: Vec::new(),
             last_keypress_time: Instant::now(),
+            review_state: None,
         }
     }
 

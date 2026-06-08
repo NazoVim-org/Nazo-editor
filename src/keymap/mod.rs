@@ -5,10 +5,12 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 pub mod emacs;
+mod review;
 mod vim;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 pub use emacs::EmacsKeymap;
+pub use review::ReviewKeymap;
 pub use vim::VimKeymap;
 
 /// Single-threaded TUI key dispatcher.
@@ -30,5 +32,6 @@ pub fn create_keymap(keymap: crate::types::Keymap) -> Rc<RefCell<dyn KeymapHandl
     match keymap {
         crate::types::Keymap::Vim => Rc::new(RefCell::new(VimKeymap::new())),
         crate::types::Keymap::Emacs => Rc::new(RefCell::new(EmacsKeymap::new())),
+        crate::types::Keymap::Review => Rc::new(RefCell::new(ReviewKeymap::new())),
     }
 }

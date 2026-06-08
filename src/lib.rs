@@ -7,6 +7,7 @@ pub mod keymap;
 pub mod plugin;
 pub mod register;
 pub mod renderer;
+pub mod review;
 pub mod screen;
 pub mod state;
 pub mod terminal;

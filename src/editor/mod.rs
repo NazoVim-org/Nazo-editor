@@ -14,6 +14,7 @@ use crate::engine::{Engine, EngineResult};
 use crate::keymap::{create_keymap, KeymapHandler};
 use crate::plugin::PluginManager;
 use crate::renderer::Renderer;
+use crate::review::ReviewArgs;
 use crate::terminal::Terminal;
 use crate::types::{EditorState, Keymap, MessageLevel, Mode, Position, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -37,6 +38,10 @@ pub struct Editor {
     last_scroll_mod_count: usize,
     /// Cached cursor line used to skip auto-scroll on identical state.
     last_scroll_cursor_line: usize,
+    /// Currently active keymap (tracks the enum variant).
+    current_keymap: Keymap,
+    /// Keymap to restore when exiting review mode.
+    saved_keymap: Option<Keymap>,
 }
 
 impl Editor {
@@ -91,6 +96,8 @@ impl Editor {
             config: cfg,
             last_scroll_mod_count: 0,
             last_scroll_cursor_line: 0,
+            current_keymap: keymap,
+            saved_keymap: None,
         }
     }
 
@@ -168,6 +175,7 @@ impl Editor {
             &self.engine.state,
             &self.engine.window_layout,
             &self.engine.highlights,
+            self.engine.review_state.as_ref(),
         ) {
             self.engine
                 .state
@@ -307,6 +315,7 @@ impl Editor {
                     &self.engine.state,
                     &self.engine.window_layout,
                     &self.engine.highlights,
+                    self.engine.review_state.as_ref(),
                 ) {
                     self.engine
                         .state
@@ -437,6 +446,38 @@ impl Editor {
             }
         };
         self.keymap_handler = create_keymap(keymap);
+        self.current_keymap = keymap;
+        self.engine.reset_state_for_keymap_switch();
+        self.needs_render = true;
+    }
+
+    /// Enter review mode with the given arguments.
+    ///
+    /// Saves the current keymap so it can be restored on exit, sets up mock
+    /// diff data (Phase 1), and switches to the ReviewKeymap handler.
+    pub(crate) fn enter_review_mode(&mut self, args: ReviewArgs) {
+        // Save the current keymap for restoration on exit.
+        self.saved_keymap = Some(self.current_keymap);
+
+        // Try real git diff first; fall back to mock data.
+        let state = crate::review::diff::try_get_review_state(&args)
+            .unwrap_or_else(|| crate::review::mock::create_mock_review_state(args));
+
+        self.engine.review_state = Some(state);
+
+        // Switch to review keymap
+        self.keymap_handler = create_keymap(Keymap::Review);
+        self.current_keymap = Keymap::Review;
+        self.engine.state.mode = Mode::Normal;
+        self.needs_render = true;
+    }
+
+    /// Exit review mode and restore the previous keymap.
+    pub(crate) fn exit_review_mode(&mut self) {
+        let restore = self.saved_keymap.take().unwrap_or(Keymap::Vim);
+        self.keymap_handler = create_keymap(restore);
+        self.current_keymap = restore;
+        self.engine.review_state = None;
         self.engine.reset_state_for_keymap_switch();
         self.needs_render = true;
     }
@@ -513,6 +554,8 @@ mod tests {
             config: Config::default(),
             last_scroll_mod_count: 0,
             last_scroll_cursor_line: 0,
+            current_keymap: keymap,
+            saved_keymap: None,
         }
     }
 

@@ -1,0 +1,10 @@
+# ── Build optimisation for development ───────────────────────────────
+#
+# These settings trade runtime performance for compile speed, which is
+# the right trade-off during development.  Release builds are unaffected.
+#
+# If your system has `mold` (https://github.com/rui314/mold) installed,
+# uncomment the linker line below to shave another ~50 % off link time.
+
+[target.x86_64-unknown-linux-gnu]
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]

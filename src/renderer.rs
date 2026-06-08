@@ -1,5 +1,6 @@
 use crate::buffer::TextBuffer;
 use crate::highlight::Style;
+use crate::review::ReviewState;
 use crate::screen::{build_styled_chars, CellStyle, ScreenBuffer};
 use crate::terminal::Terminal;
 use crate::types::{EditorState, MessageLevel, Mode, VisualType, Window, WindowLayout};
@@ -84,6 +85,7 @@ impl Renderer {
         state: &EditorState,
         window_layout: &WindowLayout,
         highlights: &[Vec<(Style, String)>],
+        review_state: Option<&ReviewState>,
     ) -> io::Result<()> {
         let rows = terminal.rows() as usize;
         let cols = terminal.cols() as usize;
@@ -93,6 +95,17 @@ impl Renderer {
         self.screen.resize(rows, cols);
         if size_changed {
             self.screen.invalidate_all();
+        }
+
+        // ── Review mode uses its own rendering ──
+        if let Some(rv) = review_state {
+            crate::review::render::render_review(&mut self.screen, rv, rows, cols);
+            // Status bar is part of review rendering, just emit to terminal
+            let ansi_output = self.screen.render();
+            if !ansi_output.is_empty() {
+                terminal.write_raw(ansi_output.as_bytes())?;
+            }
+            return Ok(());
         }
 
         // If no windows, just show empty screen with status bar
