@@ -110,7 +110,7 @@ pub struct ScrollState {
 
 #[derive(Debug, Clone)]
 pub enum ReviewArgs {
-    /// No args: working tree unstaged diff
+    /// No args: diff against HEAD (staged + unstaged changes)
     WorkingTree,
     /// `--staged` or `--cached`: staged diff
     Staged,
@@ -156,7 +156,7 @@ impl ReviewArgs {
 impl std::fmt::Display for ReviewArgs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ReviewArgs::WorkingTree => write!(f, "Unstaged changes"),
+            ReviewArgs::WorkingTree => write!(f, "Changes since HEAD"),
             ReviewArgs::Staged => write!(f, "Staged changes"),
             ReviewArgs::Against(rev) => write!(f, "Diff against {}", rev),
             ReviewArgs::Range(a, b) => write!(f, "Diff {}..{}", a, b),

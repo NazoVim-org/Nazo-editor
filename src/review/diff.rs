@@ -61,10 +61,7 @@ fn find_git_root() -> Option<PathBuf> {
 
 fn run_git_diff(args: &ReviewArgs) -> Result<String, String> {
     let output = match args {
-        ReviewArgs::WorkingTree => Command::new("git")
-            .args(["diff", "--unified=3"])
-            .output()
-            .map_err(|e| format!("Failed to run git diff: {}", e))?,
+        ReviewArgs::WorkingTree => return run_working_tree_diff(),
         ReviewArgs::Staged => Command::new("git")
             .args(["diff", "--cached", "--unified=3"])
             .output()
@@ -93,6 +90,50 @@ fn run_git_diff(args: &ReviewArgs) -> Result<String, String> {
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     Ok(stdout)
+}
+
+/// Run diff for `:review` (default): show all changes since HEAD.
+///
+/// Tries `git diff HEAD --unified=3` first (shows both staged and unstaged
+/// changes). Falls back to combining staged + unstaged separately when
+/// there is no HEAD commit yet (empty repository).
+fn run_working_tree_diff() -> Result<String, String> {
+    // Try diff against HEAD — shows both staged and unstaged changes.
+    let head_result = Command::new("git")
+        .args(["diff", "HEAD", "--unified=3"])
+        .output()
+        .map_err(|e| format!("Failed to run git diff HEAD: {}", e))?;
+
+    if head_result.status.success() {
+        return Ok(String::from_utf8_lossy(&head_result.stdout).to_string());
+    }
+
+    // HEAD doesn't exist yet (empty repo). Combine staged + unstaged.
+    let staged = Command::new("git")
+        .args(["diff", "--cached", "--unified=3"])
+        .output()
+        .map_err(|e| format!("Failed to run git diff --cached: {}", e))?;
+    let unstaged = Command::new("git")
+        .args(["diff", "--unified=3"])
+        .output()
+        .map_err(|e| format!("Failed to run git diff: {}", e))?;
+
+    if !staged.status.success() {
+        return Err(format!(
+            "git diff --cached failed: {}",
+            String::from_utf8_lossy(&staged.stderr).trim()
+        ));
+    }
+    if !unstaged.status.success() {
+        return Err(format!(
+            "git diff failed: {}",
+            String::from_utf8_lossy(&unstaged.stderr).trim()
+        ));
+    }
+
+    let mut combined = String::from_utf8_lossy(&staged.stdout).to_string();
+    combined.push_str(&String::from_utf8_lossy(&unstaged.stdout));
+    Ok(combined)
 }
 
 // ── Unified diff parser ─────────────────────────────────────────────
