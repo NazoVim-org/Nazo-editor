@@ -1,6 +1,6 @@
 # Review Mode — Implementation Progress
 
-> Last updated: 2026-06-07
+> Last updated: 2026-06-08
 
 ## Goal
 Add Review Mode (git diff browsing + code review workflow + proofreading annotations) to the ijevim TUI editor.
@@ -44,16 +44,36 @@ Add Review Mode (git diff browsing + code review workflow + proofreading annotat
 - `o`/`p` opens live file preview (reads actual file from disk)
 - Integration tests: temp git repo, stage/unstage hunk, verify with `git diff --cached`
 
-### ⬜ Phase 5: Annotations (Not started)
-- Comment/annotation storage in `.review/` JSON files
-- CommentInput sub-mode (mini-buffer)
-- Annotation UI in diff view (inline notes per line)
+### ✅ Phase 5: Annotations (Done)
+- `src/review/annotations.rs` — annotation storage module
+  - JSON persistence in `.review/annotations.json` (no serde dependency — hand-written JSON)
+  - `add_annotation()`, `remove_annotation()`, `toggle_resolved()`, `load_annotations()`
+  - Annotation model: `{id, file_path, line, text, resolved, created_at}`
+  - Unique ID generation (nanosecond timestamp)
+- CommentInput sub-mode:
+  - `c` keybinding in DiffView opens a mini-buffer
+  - Full character input, backspace, cursor movement (Left/Right/Home/End/Delete)
+  - Enter saves (persists annotation) and returns to DiffView
+  - Esc cancels (discards buffer)
+  - Visual mini-buffer line rendered just above status bar with label + cursor
+- Annotation UI in diff view:
+  - `[1A]` marker on lines with unresolved annotations (yellow, bold)
+  - Count shown for multiple annotations on same line
+  - Visible in both unified and side-by-side modes
+  - Status bar shows annotation count when > 0
 
-### ⬜ Phase 6: Polish & Edge Cases (Not started)
-- `--staged`/`--cached` argument support
-- HEAD/file argument support
-- Edge case handling (empty repos, binary files, large diffs)
-- Status line improvements
+### ✅ Phase 6: Polish & Edge Cases (Done)
+- `--staged`/`--cached` argument support — `ReviewArgs::Staged` + `run_git_diff` for `--cached`
+- HEAD/file argument support — `ReviewArgs::Against`, `ReviewArgs::File`, `ReviewArgs::Range`
+- Edge case handling:
+  - Binary files: parse skips them gracefully (no hunks → dropped by `build()`)
+  - Empty repos: `find_git_root` returns `None` → auto-falls back to mock data
+  - Large diffs: streaming line-by-line parser, display-side truncation
+- Status line improvements:
+  - Sub-mode indicator (`[files]`, `[diff]`, `[preview]`, `[comment]`, `[help]`)
+  - Annotation count shown in status bar when > 0
+- Tests: 3 new tests (binary diff skip, mixed binary/text, arg parsing)
+  - 18 total review/diff tests, 132 total project-wide
 
 ## Key Decisions
 - Mock data in `src/review/mock.rs` so `editor/mod.rs` changes don't force full mock recompile
@@ -61,12 +81,13 @@ Add Review Mode (git diff browsing + code review workflow + proofreading annotat
 - `.cargo/config.toml` created with mold linker comment for future speedup
 - `ReviewKeymap` lives in `src/keymap/review.rs` following existing Vim/Emacs convention
 - `enter_review_mode` is sync (git CLI calls fast enough to block briefly)
-- `Enter` in DiffView = toggle hunk stage/unstage; `o`/`p` = open preview
+- `Enter` in DiffView = toggle hunk stage/unstage; `o`/`p` = open preview; `c` = add comment
 
 ## Test Status
-- 75 tests pass (71 original + 4 new diff tests)
+- 132 tests pass (51 lib unit + 10 main unit + 71 integration)
+- 18 review/diff-specific tests (5 annotations + 13 diff)
 - `cargo clippy` has toolchain hash mismatch (Nix rustc vs clippy-driver) — not a code issue
-- Clean build: ~28s full, ~4-5s file-change incremental
+- No warnings in `cargo check`
 - `cargo check` recommended for fast feedback during development
 
 ## Build Configuration

@@ -33,6 +33,8 @@ pub fn try_get_review_state(args: &ReviewArgs) -> Option<ReviewState> {
         diff_style: crate::review::DiffStyle::Unified,
         file_list_width: 30,
         project_root: Some(project_root),
+        comment_buffer: String::new(),
+        comment_cursor: 0,
     })
 }
 
@@ -129,9 +131,7 @@ pub fn parse_unified_diff(input: &str) -> Vec<DiffFile> {
             // Old file path (may include /dev/null)
             if let Some(ref mut file) = current_file {
                 let cleaned = path.trim_start_matches("a/");
-                if cleaned == "/dev/null" {
-                    file.old_path = cleaned.to_string();
-                } else if file.old_path == "unknown" {
+                if cleaned == "/dev/null" || file.old_path == "unknown" {
                     file.old_path = cleaned.to_string();
                 }
             }
@@ -139,9 +139,7 @@ pub fn parse_unified_diff(input: &str) -> Vec<DiffFile> {
             // New file path (may include /dev/null)
             if let Some(ref mut file) = current_file {
                 let cleaned = path.trim_start_matches("b/");
-                if cleaned == "/dev/null" {
-                    file.new_path = cleaned.to_string();
-                } else if file.new_path == "unknown" {
+                if cleaned == "/dev/null" || file.new_path == "unknown" {
                     file.new_path = cleaned.to_string();
                 }
             }
@@ -278,9 +276,7 @@ pub fn stage_hunk(hunk: &Hunk, file_path: &str) -> Result<(), String> {
     if output.success() {
         Ok(())
     } else {
-        Err(format!(
-            "git apply --cached failed, hunk may conflict with current index"
-        ))
+        Err("git apply --cached failed, hunk may conflict with current index".to_string())
     }
 }
 
@@ -307,9 +303,10 @@ pub fn unstage_hunk(hunk: &Hunk, file_path: &str) -> Result<(), String> {
     if output.success() {
         Ok(())
     } else {
-        Err(format!(
+        Err(
             "git apply --cached --reverse failed, hunk may not be staged or may conflict"
-        ))
+                .to_string(),
+        )
     }
 }
 
@@ -623,9 +620,70 @@ index abc..000
     }
 
     #[test]
+    fn parse_binary_diff_skipped() {
+        // Binary diff lines should be skipped — the parser returns an empty
+        // file entry (no hunks) which gets filtered out by build().
+        let input = "\
+diff --git a/image.png b/image.png
+index abc..def 100644
+Binary files a/image.png and b/image.png differ
+";
+        let files = parse_unified_diff(input);
+        // Binary diffs have no hunks, so build() returns None and the file
+        // is not included.
+        assert!(files.is_empty(), "binary diffs should produce no files");
+    }
+
+    #[test]
+    fn parse_diff_with_binary_and_text() {
+        let input = "\
+diff --git a/image.png b/image.png
+Binary files a/image.png and b/image.png differ
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1 +1,2 @@
+ a
++b
+";
+        let files = parse_unified_diff(input);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].new_path, "src/main.rs");
+    }
+
+    #[test]
+    fn parse_staged_args() {
+        // Verify ReviewArgs parse --staged and --cached correctly
+        match ReviewArgs::parse("--staged") {
+            ReviewArgs::Staged => {}
+            other => panic!("expected Staged, got {:?}", other),
+        }
+        match ReviewArgs::parse("--cached") {
+            ReviewArgs::Staged => {}
+            other => panic!("expected Staged (cached), got {:?}", other),
+        }
+        match ReviewArgs::parse("") {
+            ReviewArgs::WorkingTree => {}
+            other => panic!("expected WorkingTree, got {:?}", other),
+        }
+        match ReviewArgs::parse("HEAD") {
+            ReviewArgs::Against(ref s) if s == "HEAD" => {}
+            other => panic!("expected Against(HEAD), got {:?}", other),
+        }
+        match ReviewArgs::parse("HEAD~3") {
+            ReviewArgs::Against(ref s) if s == "HEAD~3" => {}
+            other => panic!("expected Against(HEAD~3), got {:?}", other),
+        }
+        match ReviewArgs::parse("main..feature") {
+            ReviewArgs::Range(ref a, ref b) if a == "main" && b == "feature" => {}
+            other => panic!("expected Range(main, feature), got {:?}", other),
+        }
+    }
+
+    #[test]
     fn stage_hunk_integration() {
         // Only run in a git repo (this project)
-        let root = match find_git_root() {
+        let _root = match find_git_root() {
             Some(r) => r,
             None => {
                 eprintln!("Skipping stage_hunk test (not in a repo)");

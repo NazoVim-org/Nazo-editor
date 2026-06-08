@@ -1,3 +1,4 @@
+pub mod annotations;
 pub mod diff;
 pub mod layout;
 pub mod mock;

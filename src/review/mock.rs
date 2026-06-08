@@ -112,5 +112,7 @@ pub fn create_mock_review_state(args: ReviewArgs) -> ReviewState {
         diff_style: crate::review::DiffStyle::Unified,
         file_list_width: 30,
         project_root: None,
+        comment_buffer: String::new(),
+        comment_cursor: 0,
     }
 }

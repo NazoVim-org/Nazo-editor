@@ -86,6 +86,7 @@ pub struct Annotation {
     pub file_path: String,
     pub line: usize,
     pub text: String,
+    pub resolved: bool,
     pub created_at: String,
 }
 
@@ -189,6 +190,10 @@ pub struct ReviewState {
     pub file_list_width: u16,
     /// Git project root (detected)
     pub project_root: Option<PathBuf>,
+    /// In-progress comment text (CommentInput sub-mode buffer)
+    pub comment_buffer: String,
+    /// Cursor position within the comment buffer
+    pub comment_cursor: usize,
 }
 
 impl ReviewState {

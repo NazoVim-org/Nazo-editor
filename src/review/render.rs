@@ -4,6 +4,7 @@ use crate::review::state::{
 };
 use crate::screen::{CellStyle, ScreenBuffer};
 use crossterm::style::Color;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 // ── Colour palette for review mode ──────────────────────────────────
@@ -36,6 +37,8 @@ const STATUS_R: Color = Color::AnsiValue(13);
 const DIM_FG: Color = Color::AnsiValue(245);
 /// Separator between file list and diff
 const SEPARATOR_FG: Color = Color::AnsiValue(240);
+/// Yellow foreground for annotation markers
+const ANNOTATION_FG: Color = Color::AnsiValue(11);
 
 // ── Main entry point ────────────────────────────────────────────────
 
@@ -81,6 +84,7 @@ pub fn render_review(screen: &mut ScreenBuffer, review: &ReviewState, rows: usiz
             render_file_list(screen, review, layout.file_list);
             render_separator(screen, layout.file_list.col_end, layout.status_row, cols);
             render_diff_view(screen, review, layout.diff_view);
+            render_comment_input(screen, review, layout.status_row, cols);
         }
     }
 
@@ -267,20 +271,34 @@ fn render_unified_diff(
     );
 
     // Collect all lines from all hunks with their hunk headers
+    let annotated_set = annotated_lines_for_file(review, &file.new_path);
     let mut display_lines: Vec<DisplayLine> = Vec::new();
 
     for (hunk_idx, hunk) in file.hunks.iter().enumerate() {
         let is_selected_hunk = hunk_idx == review.selected_hunk;
 
-        // Hunk header with staged indicator
         display_lines.push(DisplayLine {
             kind: DisplayLineKind::HunkHeader,
             content: hunk.header.clone(),
             is_selected: is_selected_hunk,
             staged: hunk.staged,
+            has_annotation: false,
+            annotation_count: 0,
         });
 
         for line in &hunk.lines {
+            let lineno = line.new_lineno.or(line.old_lineno);
+            let (has_ann, ann_count) = match lineno {
+                Some(ln) => (annotated_set.contains(&ln), {
+                    review
+                        .annotations
+                        .iter()
+                        .filter(|a| a.file_path == file.new_path && a.line == ln && !a.resolved)
+                        .count()
+                }),
+                None => (false, 0),
+            };
+
             display_lines.push(DisplayLine {
                 kind: match line.kind {
                     DiffLineKind::Add => DisplayLineKind::Added,
@@ -290,14 +308,15 @@ fn render_unified_diff(
                 content: line.content.clone(),
                 is_selected: is_selected_hunk,
                 staged: hunk.staged,
+                has_annotation: has_ann,
+                annotation_count: ann_count,
             });
         }
     }
 
     // Render visible lines
     let scroll = review.scroll.scroll_top;
-    let max_visible = rect.height().saturating_sub(2); // 2 lines for headers
-    let content_width = rect.width();
+    let max_visible = rect.height().saturating_sub(2);
 
     for i in 0..max_visible {
         let idx = scroll + i;
@@ -309,100 +328,16 @@ fn render_unified_diff(
 
         match dl.kind {
             DisplayLineKind::HunkHeader => {
-                let staged_indicator = if dl.staged { "[S] " } else { "[ ] " };
-                let full_content = format!("{}{}", staged_indicator, dl.content);
-                let style = CellStyle {
-                    fg: HUNK_HEADER_FG,
-                    bg: if dl.is_selected {
-                        SELECTED_BG
-                    } else {
-                        Color::Reset
-                    },
-                    bold: true,
-                    ..CellStyle::default()
-                };
-                let truncated = truncate(&full_content, content_width);
-                set_string_styled(screen, row, rect.col_start, &truncated, style);
-                // Fill remaining
-                fill_to_end(
-                    screen,
-                    row,
-                    rect.col_start + display_width(&truncated),
-                    rect.col_end,
-                    style,
-                );
+                render_hunk_header_line(screen, row, &rect, dl);
             }
             DisplayLineKind::Added => {
-                let prefix_style = CellStyle {
-                    fg: ADD_FG,
-                    bg: if dl.is_selected { SELECTED_BG } else { ADD_BG },
-                    bold: true,
-                    ..CellStyle::default()
-                };
-                let content_style = CellStyle {
-                    bg: if dl.is_selected { SELECTED_BG } else { ADD_BG },
-                    ..CellStyle::default()
-                };
-                screen.set_cell(row, rect.col_start, '+', prefix_style);
-                let content = truncate(&dl.content, content_width.saturating_sub(1));
-                set_string_styled(screen, row, rect.col_start + 1, &content, content_style);
-                let fill_bg = if dl.is_selected { SELECTED_BG } else { ADD_BG };
-                fill_to_end(
-                    screen,
-                    row,
-                    rect.col_start + 1 + display_width(&content),
-                    rect.col_end,
-                    CellStyle {
-                        bg: fill_bg,
-                        ..CellStyle::default()
-                    },
-                );
+                render_diff_line(screen, row, &rect, dl, '+', ADD_BG, ADD_FG);
             }
             DisplayLineKind::Deleted => {
-                let prefix_style = CellStyle {
-                    fg: DEL_FG,
-                    bg: if dl.is_selected { SELECTED_BG } else { DEL_BG },
-                    bold: true,
-                    ..CellStyle::default()
-                };
-                let content_style = CellStyle {
-                    bg: if dl.is_selected { SELECTED_BG } else { DEL_BG },
-                    ..CellStyle::default()
-                };
-                screen.set_cell(row, rect.col_start, '-', prefix_style);
-                let content = truncate(&dl.content, content_width.saturating_sub(1));
-                set_string_styled(screen, row, rect.col_start + 1, &content, content_style);
-                let fill_bg = if dl.is_selected { SELECTED_BG } else { DEL_BG };
-                fill_to_end(
-                    screen,
-                    row,
-                    rect.col_start + 1 + display_width(&content),
-                    rect.col_end,
-                    CellStyle {
-                        bg: fill_bg,
-                        ..CellStyle::default()
-                    },
-                );
+                render_diff_line(screen, row, &rect, dl, '-', DEL_BG, DEL_FG);
             }
             DisplayLineKind::Context => {
-                let style = CellStyle {
-                    bg: if dl.is_selected {
-                        SELECTED_BG
-                    } else {
-                        Color::Reset
-                    },
-                    ..CellStyle::default()
-                };
-                screen.set_cell(row, rect.col_start, ' ', style);
-                let content = truncate(&dl.content, content_width.saturating_sub(1));
-                set_string_styled(screen, row, rect.col_start + 1, &content, style);
-                fill_to_end(
-                    screen,
-                    row,
-                    rect.col_start + 1 + display_width(&content),
-                    rect.col_end,
-                    style,
-                );
+                render_diff_line(screen, row, &rect, dl, ' ', Color::Reset, Color::Reset);
             }
         }
     }
@@ -470,7 +405,7 @@ fn render_side_by_side_diff(
     }
 
     // Build side-by-side lines from hunks
-    // For simplicity, show old on left and new on right, aligned
+    let annotated_set = annotated_lines_for_file(review, &file.new_path);
     let mut left_lines: Vec<DisplayLine> = Vec::new();
     let mut right_lines: Vec<DisplayLine> = Vec::new();
 
@@ -483,59 +418,84 @@ fn render_side_by_side_diff(
             content: format!("{}@@ -{}", staged_indicator, hunk.old_start),
             is_selected,
             staged: hunk.staged,
+            has_annotation: false,
+            annotation_count: 0,
         });
         right_lines.push(DisplayLine {
             kind: DisplayLineKind::HunkHeader,
             content: format!("{}@@ +{}", staged_indicator, hunk.new_start),
             is_selected,
             staged: hunk.staged,
+            has_annotation: false,
+            annotation_count: 0,
         });
 
         for line in &hunk.lines {
+            let lineno = line.new_lineno.or(line.old_lineno);
+            let (has_ann, ann_count) = match lineno {
+                Some(ln) => (annotated_set.contains(&ln), {
+                    review
+                        .annotations
+                        .iter()
+                        .filter(|a| a.file_path == file.new_path && a.line == ln && !a.resolved)
+                        .count()
+                }),
+                None => (false, 0),
+            };
+
             match line.kind {
                 DiffLineKind::Add => {
-                    // Only in new
                     left_lines.push(DisplayLine {
                         kind: DisplayLineKind::Context,
                         content: String::new(),
                         is_selected,
                         staged: hunk.staged,
+                        has_annotation: false,
+                        annotation_count: 0,
                     });
                     right_lines.push(DisplayLine {
                         kind: DisplayLineKind::Added,
                         content: line.content.clone(),
                         is_selected,
                         staged: hunk.staged,
+                        has_annotation: has_ann,
+                        annotation_count: ann_count,
                     });
                 }
                 DiffLineKind::Delete => {
-                    // Only in old
                     left_lines.push(DisplayLine {
                         kind: DisplayLineKind::Deleted,
                         content: line.content.clone(),
                         is_selected,
                         staged: hunk.staged,
+                        has_annotation: has_ann,
+                        annotation_count: ann_count,
                     });
                     right_lines.push(DisplayLine {
                         kind: DisplayLineKind::Context,
                         content: String::new(),
                         is_selected,
                         staged: hunk.staged,
+                        has_annotation: false,
+                        annotation_count: 0,
                     });
                 }
                 DiffLineKind::Context => {
-                    // Both
                     left_lines.push(DisplayLine {
                         kind: DisplayLineKind::Context,
                         content: line.content.clone(),
                         is_selected,
                         staged: hunk.staged,
+                        has_annotation: has_ann,
+                        annotation_count: ann_count,
                     });
                     right_lines.push(DisplayLine {
                         kind: DisplayLineKind::Context,
                         content: line.content.clone(),
                         is_selected,
                         staged: hunk.staged,
+                        has_annotation: false,
+                        annotation_count: 0,
                     });
                 }
             }
@@ -550,114 +510,31 @@ fn render_side_by_side_diff(
         let row = rect.row_start + 1 + i;
 
         if idx < left_lines.len() {
-            render_side_line(screen, row, left_rect, &left_lines[idx], false);
+            render_side_line(screen, row, left_rect, &left_lines[idx]);
         }
         if idx < right_lines.len() {
-            render_side_line(screen, row, right_rect, &right_lines[idx], true);
+            render_side_line(screen, row, right_rect, &right_lines[idx]);
         }
     }
 }
 
-fn render_side_line(
-    screen: &mut ScreenBuffer,
-    row: usize,
-    rect: PanelRect,
-    dl: &DisplayLine,
-    _is_right: bool,
-) {
-    let content_width = rect.width();
-    if content_width < 1 {
+fn render_side_line(screen: &mut ScreenBuffer, row: usize, rect: PanelRect, dl: &DisplayLine) {
+    if rect.width() < 1 {
         return;
     }
 
     match dl.kind {
         DisplayLineKind::HunkHeader => {
-            let style = CellStyle {
-                fg: HUNK_HEADER_FG,
-                bg: if dl.is_selected {
-                    SELECTED_BG
-                } else {
-                    Color::Reset
-                },
-                bold: true,
-                ..CellStyle::default()
-            };
-            let truncated = truncate(&dl.content, content_width);
-            set_string_styled(screen, row, rect.col_start, &truncated, style);
+            render_hunk_header_line(screen, row, &rect, dl);
         }
         DisplayLineKind::Added => {
-            let style = CellStyle {
-                bg: if dl.is_selected { SELECTED_BG } else { ADD_BG },
-                ..CellStyle::default()
-            };
-            if !dl.content.is_empty() {
-                let truncated = truncate(&dl.content, content_width.saturating_sub(1));
-                screen.set_cell(
-                    row,
-                    rect.col_start,
-                    '+',
-                    CellStyle {
-                        fg: ADD_FG,
-                        bg: if dl.is_selected { SELECTED_BG } else { ADD_BG },
-                        bold: true,
-                        ..CellStyle::default()
-                    },
-                );
-                set_string_styled(screen, row, rect.col_start + 1, &truncated, style);
-                fill_to_end(
-                    screen,
-                    row,
-                    rect.col_start + 1 + display_width(&truncated),
-                    rect.col_end,
-                    style,
-                );
-            } else {
-                fill_to_end(screen, row, rect.col_start, rect.col_end, style);
-            }
+            render_diff_line(screen, row, &rect, dl, '+', ADD_BG, ADD_FG);
         }
         DisplayLineKind::Deleted => {
-            let style = CellStyle {
-                bg: if dl.is_selected { SELECTED_BG } else { DEL_BG },
-                ..CellStyle::default()
-            };
-            if !dl.content.is_empty() {
-                let truncated = truncate(&dl.content, content_width.saturating_sub(1));
-                screen.set_cell(
-                    row,
-                    rect.col_start,
-                    '-',
-                    CellStyle {
-                        fg: DEL_FG,
-                        bg: if dl.is_selected { SELECTED_BG } else { DEL_BG },
-                        bold: true,
-                        ..CellStyle::default()
-                    },
-                );
-                set_string_styled(screen, row, rect.col_start + 1, &truncated, style);
-                fill_to_end(
-                    screen,
-                    row,
-                    rect.col_start + 1 + display_width(&truncated),
-                    rect.col_end,
-                    style,
-                );
-            } else {
-                fill_to_end(screen, row, rect.col_start, rect.col_end, style);
-            }
+            render_diff_line(screen, row, &rect, dl, '-', DEL_BG, DEL_FG);
         }
         DisplayLineKind::Context => {
-            let style = CellStyle {
-                bg: if dl.is_selected {
-                    SELECTED_BG
-                } else {
-                    Color::Reset
-                },
-                ..CellStyle::default()
-            };
-            if !dl.content.is_empty() {
-                let truncated = truncate(&dl.content, content_width);
-                set_string_styled(screen, row, rect.col_start, &truncated, style);
-            }
+            render_diff_line(screen, row, &rect, dl, ' ', Color::Reset, Color::Reset);
         }
     }
 }
@@ -760,6 +637,7 @@ fn render_help_overlay(screen: &mut ScreenBuffer, rows: usize, cols: usize) {
         " ║    j/k  Scroll lines                     ║ ",
         " ║    [/]  Previous/next hunk               ║ ",
         " ║    Enter Toggle hunk stage (git apply)   ║ ",
+        " ║    c    Add comment on current line      ║ ",
         " ║    o/p   Open file preview               ║ ",
         " ║    d    Toggle diff style (unified/sbs)  ║ ",
         " ║                                          ║ ",
@@ -820,6 +698,99 @@ fn render_help_overlay(screen: &mut ScreenBuffer, rows: usize, cols: usize) {
     }
 }
 
+// ── Comment Input mini-buffer ───────────────────────────────────────
+
+fn render_comment_input(
+    screen: &mut ScreenBuffer,
+    review: &ReviewState,
+    status_row: usize,
+    cols: usize,
+) {
+    // Render a mini-buffer line just above the status bar
+    let input_row = status_row.saturating_sub(1);
+
+    // Clear the line
+    for c in 0..cols {
+        screen.set_cell(
+            input_row,
+            c,
+            ' ',
+            CellStyle {
+                bg: Color::AnsiValue(17),
+                ..CellStyle::default()
+            },
+        );
+    }
+
+    // Label
+    let label = " Comment: ";
+    let label_style = CellStyle {
+        fg: Color::AnsiValue(11),
+        bg: Color::AnsiValue(17),
+        bold: true,
+        ..CellStyle::default()
+    };
+    let mut col = 0usize;
+    for ch in label.chars() {
+        if col < cols {
+            screen.set_cell(input_row, col, ch, label_style);
+            col += 1;
+        }
+    }
+
+    // Buffer content with cursor
+    let buffer_style = CellStyle {
+        fg: Color::White,
+        bg: Color::AnsiValue(17),
+        ..CellStyle::default()
+    };
+    let cursor_style = CellStyle {
+        fg: Color::Black,
+        bg: Color::AnsiValue(11),
+        ..CellStyle::default()
+    };
+
+    let max_input_cols = cols.saturating_sub(col + 2);
+    let display_text: String = review.comment_buffer.chars().take(max_input_cols).collect();
+    let cursor_display_pos = {
+        let buf_before_cursor = &review.comment_buffer[..review.comment_cursor];
+        let chars_before = buf_before_cursor.chars().count();
+        chars_before.min(max_input_cols)
+    };
+
+    for (i, ch) in display_text.chars().enumerate() {
+        if col + i >= cols {
+            break;
+        }
+        if i == cursor_display_pos {
+            screen.set_cell(input_row, col + i, ch, cursor_style);
+        } else {
+            screen.set_cell(input_row, col + i, ch, buffer_style);
+        }
+    }
+
+    // Cursor at end if past buffer
+    if cursor_display_pos >= display_text.chars().count() && col + cursor_display_pos < cols {
+        screen.set_cell(input_row, col + cursor_display_pos, ' ', cursor_style);
+    }
+
+    // Hint text on the right
+    let hint = " Esc:cancel Enter:save ";
+    let hint_style = CellStyle {
+        fg: Color::AnsiValue(245),
+        bg: Color::AnsiValue(17),
+        italic: true,
+        ..CellStyle::default()
+    };
+    let hint_col = cols.saturating_sub(hint.len());
+    for (i, ch) in hint.chars().enumerate() {
+        let c = hint_col + i;
+        if c < cols {
+            screen.set_cell(input_row, c, ch, hint_style);
+        }
+    }
+}
+
 // ── Status bar ──────────────────────────────────────────────────────
 
 fn render_status_bar(screen: &mut ScreenBuffer, review: &ReviewState, row: usize, cols: usize) {
@@ -850,17 +821,47 @@ fn render_status_bar(screen: &mut ScreenBuffer, review: &ReviewState, row: usize
         }
     }
 
+    // Sub-mode indicator
+    let sub_mode_text = match review.sub_mode {
+        ReviewSubMode::FileList => " [files] ",
+        ReviewSubMode::DiffView => " [diff] ",
+        ReviewSubMode::Preview => " [preview] ",
+        ReviewSubMode::CommentInput => " [comment] ",
+        ReviewSubMode::Help => " [help] ",
+    };
+    let sub_mode_style = CellStyle {
+        fg: DIM_FG,
+        bg: STATUS_BG,
+        ..CellStyle::default()
+    };
+    let sub_mode_start = mode_text.len() + 1;
+    for (i, ch) in sub_mode_text.chars().enumerate() {
+        let col = sub_mode_start + i;
+        if col < cols {
+            screen.set_cell(row, col, ch, sub_mode_style);
+        }
+    }
+
     // Info text
     let file = review.files.get(review.selected_file);
     let file_name = file.map(|f| f.new_path.as_str()).unwrap_or("");
     let changes = review.total_changes();
-    let info_text = format!(" {}  |  {} changes  |  {}", file_name, changes, review.args,);
+    let ann_count = review.annotations.len();
+    let ann_text = if ann_count > 0 {
+        format!(" {} annots ", ann_count)
+    } else {
+        String::new()
+    };
+    let info_text = format!(
+        "{}{}  |  {} changes  |  {}",
+        file_name, ann_text, changes, review.args,
+    );
     let info_style = CellStyle {
         fg: Color::White,
         bg: STATUS_BG,
         ..CellStyle::default()
     };
-    let info_start = mode_text.len() + 1;
+    let info_start = sub_mode_start + sub_mode_text.len();
     for (i, ch) in info_text.chars().enumerate() {
         let col = info_start + i;
         if col < cols {
@@ -904,6 +905,10 @@ struct DisplayLine {
     is_selected: bool,
     /// Whether the hunk this line belongs to is staged
     staged: bool,
+    /// Whether this line has unresolved annotations
+    has_annotation: bool,
+    /// Number of unresolved annotations on this line
+    annotation_count: usize,
 }
 
 fn status_color(status: FileStatus) -> Color {
@@ -992,4 +997,154 @@ fn read_file_lines(review: &ReviewState, file_path: &str) -> Vec<String> {
         Err(_) => return Vec::new(),
     };
     content.lines().map(|l| l.to_string()).collect()
+}
+
+// ── Shared diff rendering helpers ───────────────────────────────────
+//
+// These eliminate the 300+ line duplication between unified and
+// side-by-side diff rendering. Each function handles one aspect of
+// the 4 DisplayLineKind variants.
+
+/// Build a set of line numbers with unresolved annotations for a file.
+fn annotated_lines_for_file(review: &ReviewState, file_path: &str) -> HashSet<usize> {
+    review
+        .annotations
+        .iter()
+        .filter(|a| a.file_path == file_path && !a.resolved)
+        .map(|a| a.line)
+        .collect()
+}
+
+/// Render a hunk header line (with staged indicator + annotation suffix).
+fn render_hunk_header_line(
+    screen: &mut ScreenBuffer,
+    row: usize,
+    rect: &PanelRect,
+    dl: &DisplayLine,
+) {
+    let staged = if dl.staged { "[S] " } else { "[ ] " };
+    let ann_suffix = if dl.has_annotation {
+        format!(" [{}A]", dl.annotation_count)
+    } else {
+        String::new()
+    };
+    let full = format!("{}{}{}", staged, dl.content, ann_suffix);
+    let fg = if dl.has_annotation {
+        ANNOTATION_FG
+    } else {
+        HUNK_HEADER_FG
+    };
+    let bg = if dl.is_selected {
+        SELECTED_BG
+    } else {
+        Color::Reset
+    };
+    let style = CellStyle {
+        fg,
+        bg,
+        bold: true,
+        ..CellStyle::default()
+    };
+    let truncated = truncate(&full, rect.width());
+    set_string_styled(screen, row, rect.col_start, &truncated, style);
+    fill_to_end(
+        screen,
+        row,
+        rect.col_start + display_width(&truncated),
+        rect.col_end,
+        style,
+    );
+}
+
+/// Render a diff content line (Added/Deleted/Context).
+///
+/// `prefix_char` is the diff marker ('+', '-', or ' ') displayed before
+/// the annotation marker.  `bg` is the normal (non-selected) background.
+/// `prefix_fg` is the colour for the prefix character.
+fn render_diff_line(
+    screen: &mut ScreenBuffer,
+    row: usize,
+    rect: &PanelRect,
+    dl: &DisplayLine,
+    prefix_char: char,
+    bg: Color,
+    prefix_fg: Color,
+) {
+    let actual_bg = if dl.is_selected { SELECTED_BG } else { bg };
+
+    let mut col = rect.col_start;
+
+    // Prefix character ('+', '-', ' ')
+    screen.set_cell(
+        row,
+        col,
+        prefix_char,
+        CellStyle {
+            fg: prefix_fg,
+            bg: actual_bg,
+            bold: true,
+            ..CellStyle::default()
+        },
+    );
+    col += 1;
+
+    // Annotation marker
+    if dl.has_annotation {
+        let marker = format!("[{}A] ", dl.annotation_count);
+        let marker_w = display_width(&marker);
+        let marker_end = col + marker_w;
+        if marker_end <= rect.col_end {
+            set_string_styled(
+                screen,
+                row,
+                col,
+                &marker,
+                CellStyle {
+                    fg: ANNOTATION_FG,
+                    bg: actual_bg,
+                    bold: true,
+                    ..CellStyle::default()
+                },
+            );
+            col = marker_end;
+        }
+    }
+
+    // Content
+    if !dl.content.is_empty() {
+        let remaining = rect.width().saturating_sub(col - rect.col_start);
+        let truncated = truncate(&dl.content, remaining);
+        let content_end = col + display_width(&truncated);
+        set_string_styled(
+            screen,
+            row,
+            col,
+            &truncated,
+            CellStyle {
+                bg: actual_bg,
+                ..CellStyle::default()
+            },
+        );
+        fill_to_end(
+            screen,
+            row,
+            content_end,
+            rect.col_end,
+            CellStyle {
+                bg: actual_bg,
+                ..CellStyle::default()
+            },
+        );
+    } else {
+        fill_to_end(
+            screen,
+            row,
+            col,
+            rect.col_end,
+            CellStyle {
+                bg: actual_bg,
+                ..CellStyle::default()
+            },
+        );
+    }
 }
